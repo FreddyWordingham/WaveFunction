@@ -29,7 +29,10 @@ fn main() {
         .with_transformations(&ALL_TRANSFORMATIONS);
     println!("Num tiles: {}", tile_set.num_tiles());
 
-    // Create the output directory if it does not exist.
+    // Create the output directory if it does not exist, and wipe it if it does.
+    if std::path::Path::new(&output_dir).exists() {
+        std::fs::remove_dir_all(&output_dir).expect("Failed to remove output directory.");
+    }
     std::fs::create_dir_all(&output_dir).expect("Failed to create output directory.");
     tile_set
         .save(&output_dir)

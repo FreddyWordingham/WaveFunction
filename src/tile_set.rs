@@ -1,5 +1,7 @@
 use photo::{ImageError, ImageRGBA, Transformation};
 
+use crate::RuleSet;
+
 pub struct TileSet {
     tile_size: usize,
     border_size: usize,
@@ -11,16 +13,50 @@ impl TileSet {
         debug_assert!(tile_size > 0);
         debug_assert!(border_size > 0);
 
-        TileSet {
+        Self {
             tile_size,
             border_size,
             tiles: Vec::new(),
         }
     }
 
+    /// Load a tile set from a directory of PNG files in alphabetical order.
+    pub fn load(tile_size: usize, border_size: usize, input_dir: &str) -> Result<Self, ImageError> {
+        // List files in the given directory.
+        let mut files: Vec<String> = std::fs::read_dir(input_dir)?
+            .map(|entry| entry.unwrap().path().display().to_string())
+            .collect();
+        files.sort();
+
+        // Load the images and verify their dimensions.
+        let image_size = tile_size + (2 * border_size);
+        let mut tiles = Vec::with_capacity(files.len());
+        for file in files.iter() {
+            let image = ImageRGBA::<u8>::load(file)?;
+            assert!(
+                image.height() == image_size,
+                "Image dimensions do not match the desired tile size."
+            );
+            assert!(
+                image.width() == image_size,
+                "Image dimensions do not match the desired tile size."
+            );
+            tiles.push(image);
+        }
+
+        Ok(Self {
+            tile_size,
+            border_size,
+            tiles,
+        })
+    }
+
     pub fn save(&self, output_dir: &str) -> Result<(), ImageError> {
+        let num_tiles = self.tiles.len();
+        let digits = (num_tiles as f64).log10().ceil() as usize;
+
         for (i, tile) in self.tiles.iter().enumerate() {
-            let filename = format!("{}/{}.png", output_dir, i);
+            let filename = format!("{}/{:0width$}.png", output_dir, i, width = digits);
             tile.save(&filename)?;
         }
         Ok(())
@@ -116,5 +152,10 @@ impl TileSet {
 
         self.tiles = new_tiles;
         self
+    }
+
+    /// Determine the adjacency rules for each tile in the set.
+    pub fn generate_rules(&self) -> RuleSet {
+        RuleSet::new(Vec::new())
     }
 }
