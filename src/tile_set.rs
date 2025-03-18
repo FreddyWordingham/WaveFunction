@@ -1,4 +1,4 @@
-use photo::{ImageError, ImageRGBA, Transformation};
+use photo::{Direction, ImageError, ImageRGBA, Transformation};
 
 use crate::RuleSet;
 
@@ -156,6 +156,37 @@ impl TileSet {
 
     /// Determine the adjacency rules for each tile in the set.
     pub fn generate_rules(&self) -> RuleSet {
-        RuleSet::new(Vec::new())
+        let mut rules: Vec<[Vec<usize>; 4]> = Vec::with_capacity(self.num_tiles());
+
+        for tile in &self.tiles {
+            let mut adjacent_tiles: [Vec<usize>; 4] = Default::default();
+
+            for (n, other_tile) in self.tiles.iter().enumerate() {
+                if other_tile.view_border(Direction::South, self.border_size)
+                    == tile.view_border(Direction::North, self.border_size)
+                {
+                    adjacent_tiles[Direction::South.index::<usize>()].push(n);
+                }
+                if other_tile.view_border(Direction::West, self.border_size)
+                    == tile.view_border(Direction::East, self.border_size)
+                {
+                    adjacent_tiles[Direction::West.index::<usize>()].push(n);
+                }
+                if other_tile.view_border(Direction::North, self.border_size)
+                    == tile.view_border(Direction::South, self.border_size)
+                {
+                    adjacent_tiles[Direction::North.index::<usize>()].push(n);
+                }
+                if other_tile.view_border(Direction::East, self.border_size)
+                    == tile.view_border(Direction::West, self.border_size)
+                {
+                    adjacent_tiles[Direction::East.index::<usize>()].push(n);
+                }
+            }
+
+            rules.push(adjacent_tiles);
+        }
+
+        RuleSet::new(rules)
     }
 }

@@ -251,9 +251,9 @@ dependencies = [
 
 [[package]]
 name = "photo"
-version = "2.4.4"
+version = "2.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "918e2533af8f90c5b1b5dca4ef8700ef76d96a90f4205f93c320d0a974bed179"
+checksum = "c0a256aa54fb20418ae7e2f2689080dd10843efb06fa6b17f7de5c510310564d"
 dependencies = [
  "enterpolation",
  "indexmap",
