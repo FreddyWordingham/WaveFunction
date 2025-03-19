@@ -1,6 +1,6 @@
 use photo::{Direction, ImageError, ImageRGBA, Transformation};
 
-use crate::RuleSet;
+use crate::{Rule, RuleSet};
 
 pub struct TileSet {
     tile_size: usize,
@@ -156,35 +156,43 @@ impl TileSet {
 
     /// Determine the adjacency rules for each tile in the set.
     pub fn generate_rules(&self) -> RuleSet {
-        let mut rules: Vec<[Vec<usize>; 4]> = Vec::with_capacity(self.num_tiles());
+        let mut rules = Vec::with_capacity(self.num_tiles());
 
         for tile in &self.tiles {
-            let mut adjacent_tiles: [Vec<usize>; 4] = Default::default();
+            let mut north_adjacent = Vec::new();
+            let mut east_adjacent = Vec::new();
+            let mut south_adjacent = Vec::new();
+            let mut west_adjacent = Vec::new();
 
             for (n, other_tile) in self.tiles.iter().enumerate() {
                 if other_tile.view_border(Direction::South, self.border_size)
                     == tile.view_border(Direction::North, self.border_size)
                 {
-                    adjacent_tiles[Direction::South.index::<usize>()].push(n);
+                    north_adjacent.push(n);
                 }
                 if other_tile.view_border(Direction::West, self.border_size)
                     == tile.view_border(Direction::East, self.border_size)
                 {
-                    adjacent_tiles[Direction::West.index::<usize>()].push(n);
+                    east_adjacent.push(n);
                 }
                 if other_tile.view_border(Direction::North, self.border_size)
                     == tile.view_border(Direction::South, self.border_size)
                 {
-                    adjacent_tiles[Direction::North.index::<usize>()].push(n);
+                    south_adjacent.push(n);
                 }
                 if other_tile.view_border(Direction::East, self.border_size)
                     == tile.view_border(Direction::West, self.border_size)
                 {
-                    adjacent_tiles[Direction::East.index::<usize>()].push(n);
+                    west_adjacent.push(n);
                 }
             }
 
-            rules.push(adjacent_tiles);
+            rules.push(Rule::new(
+                north_adjacent,
+                east_adjacent,
+                south_adjacent,
+                west_adjacent,
+            ));
         }
 
         RuleSet::new(rules)
