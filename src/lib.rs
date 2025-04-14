@@ -1,14 +1,22 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! # `WaveFunction`
+//!
+//! `WaveFunction` is a library for procedurally generating 2D maps.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// #![deny(warnings)]
+#![deny(missing_docs)]
+// #![deny(unused)]
+// #![deny(dead_code)]
+#![deny(clippy::all)]
+#![deny(clippy::pedantic)]
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// mod map;
+// mod rule_set;
+mod tile;
+// mod tile_set;
+// mod wave_function;
+
+// pub use map::Map;
+// pub use rule_set::RuleSet;
+pub use tile::Tile;
+// pub use tile_set::TileSet;
+// pub use wave_function::WaveFunction;
