@@ -10,13 +10,13 @@
 #![deny(clippy::pedantic)]
 
 // mod map;
-// mod rule_set;
+// mod rules;
 mod tile;
-// mod tile_set;
+mod tileset;
 // mod wave_function;
 
 // pub use map::Map;
-// pub use rule_set::RuleSet;
+// pub use rules::Rules;
 pub use tile::Tile;
-// pub use tile_set::TileSet;
+pub use tileset::Tileset;
 // pub use wave_function::WaveFunction;

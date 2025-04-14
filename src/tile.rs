@@ -28,6 +28,11 @@ impl Tile {
         self.frequency
     }
 
+    /// Increment the `Tile`'s frequency by 1.
+    pub fn increment_frequency(&mut self) {
+        self.frequency += 1;
+    }
+
     /// Check if this `Tile` is adjacent to another `Tile`.
     pub fn is_adjacent(
         &self,
