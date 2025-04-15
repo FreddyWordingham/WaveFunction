@@ -4,4 +4,5 @@ cargo run --example cut_tiles -- \
     --overlap 1 \
     --tile-size 3 \
     --border-size 1 \
-    -v
+    -v \
+    -t

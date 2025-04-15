@@ -1,4 +1,9 @@
+use anyhow::Result;
 use photo::{ImageRGBA, Transformation};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use crate::Tile;
 
@@ -23,6 +28,46 @@ impl Tileset {
             border_size,
             tiles: Vec::new(),
         }
+    }
+
+    /// Save the tile set to the specified directory.
+    pub fn save(&self, output_dir: &Path) -> Result<()> {
+        debug_assert!(self.tiles.len() > 0);
+        debug_assert!(self.tiles.iter().all(|tile| tile.frequency() > 0));
+
+        // Ensure the output directory exists.
+        std::fs::create_dir_all(output_dir)?;
+
+        // Save the tile frequencies to a separate file.
+        let frequencies_path = output_dir.join("frequencies.txt");
+        let mut frequencies_file = std::fs::File::create(frequencies_path)?;
+
+        let image_filename_digits = ((self.tiles.len() - 1) as f64).log10().floor() as usize + 1;
+        let image_frequency_digits = self
+            .tiles
+            .iter()
+            .map(|tile| tile.frequency())
+            .max()
+            .unwrap()
+            .ilog10() as usize
+            + 1;
+
+        for (i, tile) in self.tiles.iter().enumerate() {
+            let file_name = format!("{:0width$}.png", i, width = image_filename_digits);
+            let file_path: PathBuf = output_dir.join(file_name);
+            tile.image().save(&file_path)?;
+
+            let frequency = tile.frequency();
+            writeln!(
+                frequencies_file,
+                "{} {:width$}",
+                file_path.file_name().expect("").to_string_lossy(),
+                frequency,
+                width = image_frequency_digits
+            )?;
+        }
+
+        Ok(())
     }
 
     /// Get the inner tile size.

@@ -16,11 +16,14 @@ struct Config {
     #[arg(short = 'l', long)]
     overlap: usize,
 
-    #[arg(short, long)]
+    #[arg(short = 's', long)]
     tile_size: usize,
 
     #[arg(short, long)]
     border_size: usize,
+
+    #[arg(short = 't', long)]
+    all_transformations: bool,
 
     #[clap(short, long)]
     verbose: bool,
@@ -62,12 +65,16 @@ fn main() {
         println!("Overlap           : {}", config.overlap);
         println!("Tile size         : {}", config.tile_size);
         println!("Border size       : {}", config.border_size);
+        println!("Transformations   : {}", config.all_transformations);
     }
 
     let input_image = load_input_image(&config);
 
-    // let transformation = ALL_TRANSFORMATIONS;
-    let transformation = [photo::Transformation::Identity];
+    let transformation = if config.all_transformations {
+        ALL_TRANSFORMATIONS.to_vec()
+    } else {
+        vec![photo::Transformation::Identity]
+    };
 
     let tileset = Tileset::new(config.tile_size, config.border_size).add_tiles(
         &input_image,
@@ -78,4 +85,10 @@ fn main() {
         println!("Number of tiles   : {}", tileset.num_tiles());
         print_tileset_images(&tileset);
     }
+
+    // Save the tileset to the output directory.
+    tileset.save(&config.output_dir).expect(&format!(
+        "Failed to save tileset to {}.",
+        config.output_dir.display()
+    ));
 }
