@@ -1,7 +1,8 @@
 use anyhow::Result;
 use photo::{ImageRGBA, Transformation};
 use std::{
-    io::Write,
+    fs::File,
+    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
 };
 
@@ -30,7 +31,42 @@ impl Tileset {
         }
     }
 
-    /// Save the tile set to the specified directory.
+    /// Load a `Tileset` from a directory.
+    pub fn load(mut self, input_dir: &Path) -> Result<Self> {
+        // Load the `frequencies.txt` file and parse the tile paths and frequencies.
+        let frequencies_path = input_dir.join("frequencies.txt");
+        let frequencies_file = File::open(frequencies_path)?;
+
+        let reader = BufReader::new(frequencies_file);
+        for line in reader.lines() {
+            // Skip empty lines and comments.
+            let line = line?;
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() != 2 {
+                return Err(anyhow::anyhow!("Invalid line format: {}", line));
+            }
+
+            let file_name = parts[0];
+            let frequency: usize = parts[1]
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Invalid frequency value in line: {}", line))?;
+
+            // Load the image and create a new `Tile`.
+            let image_path = input_dir.join(file_name);
+            let image = ImageRGBA::<u8>::load(&image_path)
+                .map_err(|_| anyhow::anyhow!("Failed to load image: {}", image_path.display()))?;
+            let tile = Tile::new(image, frequency);
+            self.tiles.push(tile);
+        }
+
+        Ok(self)
+    }
+
+    /// Save the `Tileset` to the specified directory.
     pub fn save(&self, output_dir: &Path) -> Result<()> {
         debug_assert!(self.tiles.len() > 0);
         debug_assert!(self.tiles.iter().all(|tile| tile.frequency() > 0));
@@ -104,10 +140,6 @@ impl Tileset {
         transforms: &[Transformation],
     ) -> Self {
         let cut_size = self.tile_size + (2 * self.border_size);
-        println!(
-            "Cutting tiles of size {} with overlap {}",
-            cut_size, overlap
-        );
         for new_image in image.extract_tiles(cut_size, overlap) {
             for &transform in transforms {
                 let transformed_image = new_image.transform(transform);
