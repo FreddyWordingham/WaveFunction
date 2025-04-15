@@ -29,6 +29,7 @@ struct Config {
     verbose: bool,
 }
 
+/// Load the input image from the given path and display it if verbose mode is enabled.
 fn load_input_image(config: &Config) -> ImageRGBA<u8> {
     let example_image = ImageRGBA::<u8>::load(&config.input_image).expect(&format!(
         "Failed to load example image: {}",
@@ -47,6 +48,7 @@ fn load_input_image(config: &Config) -> ImageRGBA<u8> {
     example_image
 }
 
+/// Print the images in the `Tileset` with their frequencies.
 fn print_tileset_images(tileset: &Tileset) {
     let mut images = Vec::with_capacity(tileset.num_tiles());
     for tile in tileset.tiles() {
@@ -95,8 +97,7 @@ fn main() {
     }
 
     // Save the tileset to the output directory.
-    tileset.save(&config.output_dir).expect(&format!(
-        "Failed to save tileset to {}.",
-        config.output_dir.display()
-    ));
+    tileset
+        .save(&config.output_dir)
+        .unwrap_or_else(|_| panic!("Failed to save tileset to {}.", config.output_dir.display()));
 }
