@@ -31,10 +31,8 @@ struct Config {
 
 /// Load the input image from the given path and display it if verbose mode is enabled.
 fn load_input_image(config: &Config) -> ImageRGBA<u8> {
-    let example_image = ImageRGBA::<u8>::load(&config.input_image).expect(&format!(
-        "Failed to load example image: {}",
-        config.input_image.display()
-    ));
+    let example_image = ImageRGBA::<u8>::load(&config.input_image).unwrap_or_else(|_| panic!("Failed to load example image: {}",
+        config.input_image.display()));
 
     if config.verbose {
         println!(
@@ -90,10 +88,8 @@ fn main() {
 
     // Delete all files in the output directory.
     if config.output_dir.exists() {
-        std::fs::remove_dir_all(&config.output_dir).expect(&format!(
-            "Failed to remove output directory: {}",
-            config.output_dir.display()
-        ));
+        std::fs::remove_dir_all(&config.output_dir).unwrap_or_else(|_| panic!("Failed to remove output directory: {}",
+            config.output_dir.display()));
     }
 
     // Save the tileset to the output directory.
