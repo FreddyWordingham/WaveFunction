@@ -8,6 +8,9 @@
 // #![deny(dead_code)]
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_sign_loss)]
 
 // mod map;
 // mod rules;

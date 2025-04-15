@@ -86,6 +86,14 @@ fn main() {
         print_tileset_images(&tileset);
     }
 
+    // Delete all files in the output directory.
+    if config.output_dir.exists() {
+        std::fs::remove_dir_all(&config.output_dir).expect(&format!(
+            "Failed to remove output directory: {}",
+            config.output_dir.display()
+        ));
+    }
+
     // Save the tileset to the output directory.
     tileset.save(&config.output_dir).expect(&format!(
         "Failed to save tileset to {}.",

@@ -10,6 +10,7 @@ pub struct Tile {
 
 impl Tile {
     /// Construct a new `Tile` with a given image and frequency.
+    #[must_use]
     pub fn new(image: ImageRGBA<u8>, frequency: usize) -> Self {
         debug_assert!(image.width() > 0);
         debug_assert!(image.height() > 0);
@@ -19,11 +20,13 @@ impl Tile {
     }
 
     /// Get the `Tile`'s image.
+    #[must_use]
     pub fn image(&self) -> &ImageRGBA<u8> {
         &self.image
     }
 
     /// Get the `Tile`'s frequency.
+    #[must_use]
     pub fn frequency(&self) -> usize {
         self.frequency
     }
@@ -34,6 +37,7 @@ impl Tile {
     }
 
     /// Check if this `Tile` is adjacent to another `Tile`.
+    #[must_use]
     pub fn is_adjacent(
         &self,
         other: &Self,

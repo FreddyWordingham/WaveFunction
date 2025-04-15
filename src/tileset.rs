@@ -8,6 +8,8 @@ use std::{
 
 use crate::Tile;
 
+const TILES_FILENAME: &str = "tiles.txt";
+
 /// A collection of all `Tile`'s which can be used to generate a `Map`.
 pub struct Tileset {
     /// Size of the `Tile`s in pixels.
@@ -20,6 +22,7 @@ pub struct Tileset {
 
 impl Tileset {
     /// Construct a new `Tileset` with a given tile size and border size.
+    #[must_use]
     pub fn new(tile_size: usize, border_size: usize) -> Self {
         debug_assert!(tile_size > 0);
         debug_assert!(border_size > 0);
@@ -32,9 +35,11 @@ impl Tileset {
     }
 
     /// Load a `Tileset` from a directory.
+    /// # Errors
+    /// Returns an error if the input directory cannot be opened or if the `frequencies.txt` file cannot be read.
     pub fn load(mut self, input_dir: &Path) -> Result<Self> {
         // Load the `frequencies.txt` file and parse the tile paths and frequencies.
-        let frequencies_path = input_dir.join("frequencies.txt");
+        let frequencies_path = input_dir.join(TILES_FILENAME);
         let frequencies_file = File::open(frequencies_path)?;
 
         let reader = BufReader::new(frequencies_file);
@@ -67,29 +72,33 @@ impl Tileset {
     }
 
     /// Save the `Tileset` to the specified directory.
+    /// # Panics
+    /// Panics if the `Tileset` is empty or if any of the `Tile`s have a frequency of 0.
+    /// # Errors
+    /// Returns an error if the output directory cannot be created or if the tile images cannot be saved.
     pub fn save(&self, output_dir: &Path) -> Result<()> {
-        debug_assert!(self.tiles.len() > 0);
+        debug_assert!(!self.tiles.is_empty());
         debug_assert!(self.tiles.iter().all(|tile| tile.frequency() > 0));
 
         // Ensure the output directory exists.
         std::fs::create_dir_all(output_dir)?;
 
         // Save the tile frequencies to a separate file.
-        let frequencies_path = output_dir.join("frequencies.txt");
-        let mut frequencies_file = std::fs::File::create(frequencies_path)?;
+        let frequencies_path = output_dir.join(TILES_FILENAME);
+        let mut frequencies_file = File::create(frequencies_path)?;
 
         let image_filename_digits = ((self.tiles.len() - 1) as f64).log10().floor() as usize + 1;
         let image_frequency_digits = self
             .tiles
             .iter()
-            .map(|tile| tile.frequency())
+            .map(Tile::frequency)
             .max()
             .unwrap()
             .ilog10() as usize
             + 1;
 
         for (i, tile) in self.tiles.iter().enumerate() {
-            let file_name = format!("{:0width$}.png", i, width = image_filename_digits);
+            let file_name = format!("{i:image_filename_digits$}.png");
             let file_path: PathBuf = output_dir.join(file_name);
             tile.image().save(&file_path)?;
 
@@ -107,32 +116,40 @@ impl Tileset {
     }
 
     /// Get the inner tile size.
+    #[must_use]
     pub fn tile_size(&self) -> usize {
         self.tile_size
     }
 
     /// Get the border size.
+    #[must_use]
     pub fn border_size(&self) -> usize {
         self.border_size
     }
 
     /// Get the number of `Tile`s in the set.
+    #[must_use]
     pub fn num_tiles(&self) -> usize {
         self.tiles.len()
     }
 
     /// Get a specific `Tile` by index.
+    /// # Panics
+    /// Panics if the index is out of bounds.
+    #[must_use]
     pub fn get_tile(&self, index: usize) -> &Tile {
         debug_assert!(index < self.tiles.len(), "Tile index out of bounds");
         self.tiles.get(index).unwrap()
     }
 
     /// Access the list of `Tile`s in the set.
+    #[must_use]
     pub fn tiles(&self) -> &[Tile] {
         &self.tiles
     }
 
     /// Add `Tile`s to the `Tileset` from an image.
+    #[must_use]
     pub fn add_tiles(
         mut self,
         image: &ImageRGBA<u8>,
