@@ -1,67 +1,37 @@
-use photo::{Direction, ImageRGBA};
+use std::fmt::{Display, Formatter};
 
-/// A candidate `Tile` for a `Map`.
-pub struct Tile {
-    /// Graphical representation of the `Tile`.
-    image: ImageRGBA<u8>,
-    /// Relative frequency of the `Tile` in generated `Map`s.
-    frequency: usize,
+const TILE_IGNORE: &str = "!";
+const TILE_WILDCARD: &str = "*";
+
+#[derive(Clone)]
+pub enum Tile {
+    Ignore,
+    Wildcard,
+    Fixed(usize),
 }
 
-impl Tile {
-    /// Construct a new `Tile` with a given image and frequency.
-    #[must_use]
-    pub fn new(image: ImageRGBA<u8>, frequency: usize) -> Self {
-        debug_assert!(image.width() > 0);
-        debug_assert!(image.height() > 0);
-        debug_assert!(frequency > 0);
-
-        Self { image, frequency }
+impl Display for Tile {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            Tile::Ignore => write!(f, "{}", TILE_IGNORE),
+            Tile::Wildcard => write!(f, "{}", TILE_WILDCARD),
+            Tile::Fixed(index) => write!(f, "{}", index),
+        }
     }
+}
 
-    /// Get the `Tile`'s image.
-    #[must_use]
-    pub fn image(&self) -> &ImageRGBA<u8> {
-        &self.image
-    }
-
-    /// Get the `Tile`'s frequency.
-    #[must_use]
-    pub fn frequency(&self) -> usize {
-        self.frequency
-    }
-
-    /// Increment the `Tile`'s frequency by 1.
-    pub fn increment_frequency(&mut self) {
-        self.frequency += 1;
-    }
-
-    /// Check if this `Tile` is adjacent to another `Tile`.
-    #[must_use]
-    pub fn is_adjacent(
-        &self,
-        other: &Self,
-        other_direction: Direction,
-        border_size: usize,
-    ) -> bool {
-        debug_assert!(border_size > 0);
-
-        match other_direction {
-            Direction::North | Direction::South => {
-                debug_assert!(self.image.height() > border_size);
-                debug_assert!(other.image.width() > border_size);
-                debug_assert!(self.image.width() == other.image.width());
-            }
-            Direction::East | Direction::West => {
-                debug_assert!(self.image.width() > border_size);
-                debug_assert!(other.image.height() > border_size);
-                debug_assert!(self.image.height() == other.image.height());
+impl From<&str> for Tile {
+    fn from(s: &str) -> Self {
+        match s {
+            "!" => Tile::Ignore,
+            "*" => Tile::Wildcard,
+            _ => {
+                if let Ok(index) = s.parse::<usize>() {
+                    Tile::Fixed(index)
+                } else {
+                    panic!("Invalid tile string: {}", s)
+                }
             }
         }
-
-        self.image.view_border(other_direction, border_size)
-            == other
-                .image
-                .view_border(other_direction.opposite(), border_size)
     }
 }

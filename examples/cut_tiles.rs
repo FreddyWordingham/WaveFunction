@@ -1,7 +1,7 @@
 use clap::Parser;
 use photo::{ALL_TRANSFORMATIONS, ImageRGBA};
 use std::path::PathBuf;
-use wave_function::Tileset;
+use wave_function::TilesetBuilder;
 
 /// Image processing configuration.
 #[derive(Parser, Debug)]
@@ -31,8 +31,12 @@ struct Config {
 
 /// Load the input image from the given path and display it if verbose mode is enabled.
 fn load_input_image(config: &Config) -> ImageRGBA<u8> {
-    let example_image = ImageRGBA::<u8>::load(&config.input_image).unwrap_or_else(|_| panic!("Failed to load example image: {}",
-        config.input_image.display()));
+    let example_image = ImageRGBA::<u8>::load(&config.input_image).unwrap_or_else(|_| {
+        panic!(
+            "Failed to load example image: {}",
+            config.input_image.display()
+        )
+    });
 
     if config.verbose {
         println!(
@@ -44,17 +48,6 @@ fn load_input_image(config: &Config) -> ImageRGBA<u8> {
     }
 
     example_image
-}
-
-/// Print the images in the `Tileset` with their frequencies.
-fn print_tileset_images(tileset: &Tileset) {
-    let mut images = Vec::with_capacity(tileset.num_tiles());
-    for tile in tileset.tiles() {
-        images.push((tile.image(), format!("{}", tile.frequency())));
-    }
-
-    // Print out the of images in an array. Get pixel data with tile.image().data[[y, x]].
-    ImageRGBA::print_image_grid_with_caption(&images, 1).unwrap();
 }
 
 fn main() {
@@ -70,30 +63,38 @@ fn main() {
 
     let input_image = load_input_image(&config);
 
-    let transformation = if config.all_transformations {
+    let transformations = if config.all_transformations {
         ALL_TRANSFORMATIONS.to_vec()
     } else {
         vec![photo::Transformation::Identity]
     };
 
-    let tileset = Tileset::new(config.tile_size, config.border_size).add_tiles(
+    let tileset_builder = TilesetBuilder::new(config.tile_size, config.border_size).add_tiles(
         &input_image,
         config.overlap,
-        &transformation,
+        &transformations,
     );
     if config.verbose {
-        println!("Number of tiles   : {}", tileset.num_tiles());
-        print_tileset_images(&tileset);
+        println!("Number of tiles   : {}", tileset_builder.len());
     }
 
     // Delete all files in the output directory.
     if config.output_dir.exists() {
-        std::fs::remove_dir_all(&config.output_dir).unwrap_or_else(|_| panic!("Failed to remove output directory: {}",
-            config.output_dir.display()));
+        std::fs::remove_dir_all(&config.output_dir).unwrap_or_else(|_| {
+            panic!(
+                "Failed to remove output directory: {}",
+                config.output_dir.display()
+            )
+        });
     }
 
     // Save the tileset to the output directory.
-    tileset
+    tileset_builder
         .save(&config.output_dir)
-        .unwrap_or_else(|_| panic!("Failed to save tileset to {}.", config.output_dir.display()));
+        .unwrap_or_else(|_| {
+            panic!(
+                "Failed to save tileset builder to {}.",
+                config.output_dir.display()
+            )
+        });
 }
