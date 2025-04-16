@@ -23,6 +23,7 @@ struct Config {
     verbose: bool,
 }
 
+/// Print the images in the `Tileset` with their frequencies.
 fn print_tileset_images(tileset: &Tileset) {
     let mut images = Vec::with_capacity(tileset.num_tiles());
     for tile in tileset.tiles() {
@@ -49,4 +50,12 @@ fn main() {
         println!("Number of tiles   : {}", tileset.num_tiles());
         print_tileset_images(&tileset);
     }
+
+    let rules = tileset.rules();
+    if config.verbose {
+        println!("{}", rules);
+    }
+    rules
+        .save(&config.output_filepath)
+        .expect("Failed to save rules");
 }

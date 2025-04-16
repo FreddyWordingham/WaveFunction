@@ -1,12 +1,13 @@
 use anyhow::Result;
-use photo::{ImageRGBA, Transformation};
+use ndarray::Array3;
+use photo::{Direction, ImageRGBA, Transformation};
 use std::{
     fs::File,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
 };
 
-use crate::Tile;
+use crate::{Rules, Tile};
 
 const TILES_FILENAME: &str = "tiles.txt";
 
@@ -173,5 +174,31 @@ impl Tileset {
             }
         }
         self
+    }
+
+    /// Determine the rules for the `Tileset`.
+    pub fn rules(&self) -> Rules {
+        // Get the tile frequencies.
+        let frequencies = self
+            .tiles
+            .iter()
+            .map(|tile| tile.frequency())
+            .collect::<Vec<_>>();
+
+        // Iterate over the tiles and check for adjacency.
+        let mut adjacency_matrix =
+            Array3::from_elem((self.tiles.len(), self.tiles.len(), 2), false);
+        for (self_index, self_tile) in self.tiles.iter().enumerate() {
+            for (other_index, other_tile) in self.tiles.iter().enumerate() {
+                if self_tile.is_adjacent(other_tile, Direction::East, self.border_size) {
+                    adjacency_matrix[[self_index, other_index, 0]] = true;
+                }
+                if self_tile.is_adjacent(other_tile, Direction::North, self.border_size) {
+                    adjacency_matrix[[self_index, other_index, 1]] = true;
+                }
+            }
+        }
+
+        Rules::new(frequencies, &adjacency_matrix)
     }
 }
