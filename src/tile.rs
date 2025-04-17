@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 const TILE_IGNORE: &str = "!";
 const TILE_WILDCARD: &str = "*";
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Tile {
     Ignore,
     Wildcard,

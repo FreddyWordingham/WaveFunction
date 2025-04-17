@@ -8,6 +8,10 @@ use std::{
 
 use crate::{Tile, Tileset};
 
+const WILDCARD_COLOUR: [u8; 4] = [255, 0, 255, 255];
+const IGNORE_COLOUR: [u8; 4] = [0, 0, 0, 0];
+
+#[derive(Clone)]
 pub struct Map {
     tiles: Array2<Tile>,
 }
@@ -104,16 +108,34 @@ impl Map {
             self.max_index().map_or(true, |index| index < tileset.len()),
             "Tile index out of bounds for tileset"
         );
-        unimplemented!()
+        let interiors = tileset.interiors();
+        let interior_size = tileset.interior_size();
+        let wildcard = ImageRGBA::filled([interior_size, interior_size], WILDCARD_COLOUR);
+        let ignore = ImageRGBA::filled([interior_size, interior_size], IGNORE_COLOUR);
+        let data = self.tiles.mapv(|tile| match tile {
+            Tile::Fixed(index) => interiors[index].clone(),
+            Tile::Ignore => ignore.clone(),
+            Tile::Wildcard => wildcard.clone(),
+        });
+
+        let mut r_data = data.clone();
+        for i in 0..data.shape()[0] {
+            for j in 0..data.shape()[1] {
+                r_data[[data.shape()[0] - i - 1, j]] = data[[i, j]].clone();
+            }
+        }
+
+        ImageRGBA::from_tiles(&r_data)
     }
 }
 
 impl Display for Map {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        let print_width = self.max_index().unwrap_or(0).ilog10() as usize + 1;
+        let print_width = self.max_index().unwrap_or(0).to_string().len();
         for row in self.tiles.rows() {
             for tile in row.iter() {
-                write!(f, "{tile:print_width$} ")?;
+                let s = &format!("{}", tile);
+                write!(f, "{s:>print_width$} ")?;
             }
             writeln!(f)?;
         }

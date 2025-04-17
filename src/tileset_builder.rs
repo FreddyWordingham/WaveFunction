@@ -1,10 +1,7 @@
-use anyhow::Result;
-use photo::{ImageRGBA, Transformation};
-use std::{io::Write, path::Path};
+use ndarray::Array3;
+use photo::{Direction, ImageRGBA, Transformation};
 
-use crate::Tileset;
-
-const FREQUENCIES_FILENAME: &str = "frequencies.txt";
+use crate::{Rules, Tileset};
 
 pub struct TilesetBuilder {
     interior_size: usize,
@@ -23,46 +20,6 @@ impl TilesetBuilder {
         }
     }
 
-    /// Save the `TilesetBuilder` to the given directory.
-    pub fn save(&self, path: &Path) -> Result<()> {
-        assert!(!path.is_file(), "Path must be a directory");
-
-        // Create the directory if it doesn't exist
-        if !path.exists() {
-            std::fs::create_dir_all(path)?;
-        }
-
-        // Save the frequencies to a file
-        let max_frequency = self
-            .tiles
-            .iter()
-            .map(|(_, frequency)| *frequency)
-            .max()
-            .unwrap_or(0);
-        let width = max_frequency.to_string().len();
-
-        let frequencies_path = path.join(FREQUENCIES_FILENAME);
-        let mut frequencies_file = std::fs::File::create(frequencies_path)?;
-        for (i, (tile, frequency)) in self.tiles.iter().enumerate() {
-            let tile_path = path.join(format!("{0:width$}.png", i));
-            tile.save(&tile_path)?;
-            writeln!(
-                frequencies_file,
-                "{} {:width$}",
-                tile_path.display(),
-                frequency
-            )?;
-        }
-
-        // Save the tiles to individual files
-        for (tile, frequency) in &self.tiles {
-            let tile_path = path.join(format!("{}.png", frequency));
-            tile.save(&tile_path)?;
-        }
-
-        Ok(())
-    }
-
     pub fn interior_size(&self) -> usize {
         self.interior_size
     }
@@ -71,12 +28,39 @@ impl TilesetBuilder {
         self.border_size
     }
 
+    pub fn tiles(&self) -> &[(ImageRGBA<u8>, usize)] {
+        &self.tiles
+    }
+
     pub fn tile_size(&self) -> usize {
         self.interior_size + (2 * self.border_size)
     }
 
     pub fn len(&self) -> usize {
         self.tiles.len()
+    }
+
+    fn adjacency_matrix(&self) -> Array3<bool> {
+        debug_assert!(
+            !self.tiles.is_empty(),
+            "TilesetBuilder must contain at least one tile before it can be built"
+        );
+        let mut adjacent = Array3::from_elem((self.len(), self.len(), 2), false);
+        for (self_index, self_tile) in self.tiles.iter().enumerate() {
+            for (other_index, other_tile) in self.tiles.iter().enumerate() {
+                if self_tile.0.view_border(Direction::East, self.border_size)
+                    == other_tile.0.view_border(Direction::West, self.border_size)
+                {
+                    adjacent[[self_index, other_index, 0]] = true;
+                }
+                if self_tile.0.view_border(Direction::North, self.border_size)
+                    == other_tile.0.view_border(Direction::South, self.border_size)
+                {
+                    adjacent[[self_index, other_index, 1]] = true;
+                }
+            }
+        }
+        adjacent
     }
 
     pub fn add_tiles(
@@ -102,7 +86,12 @@ impl TilesetBuilder {
         self
     }
 
-    pub fn build() -> Tileset {
-        unimplemented!()
+    pub fn build(self) -> Tileset {
+        debug_assert!(
+            !self.tiles.is_empty(),
+            "TilesetBuilder must contain at least one tile before it can be built"
+        );
+        let rules = Rules::new(self.adjacency_matrix());
+        Tileset::new(self.interior_size, self.border_size, self.tiles, rules)
     }
 }

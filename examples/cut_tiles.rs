@@ -50,6 +50,18 @@ fn load_input_image(config: &Config) -> ImageRGBA<u8> {
     example_image
 }
 
+fn print_tileset_images(tileset_builder: &TilesetBuilder) {
+    ImageRGBA::print_image_grid_with_caption(
+        &tileset_builder
+            .tiles()
+            .iter()
+            .map(|tile| (&tile.0, tile.1.to_string()))
+            .collect::<Vec<_>>(),
+        1,
+    )
+    .unwrap();
+}
+
 fn main() {
     let config = Config::parse();
     if config.verbose {
@@ -76,7 +88,11 @@ fn main() {
     );
     if config.verbose {
         println!("Number of tiles   : {}", tileset_builder.len());
+        print_tileset_images(&tileset_builder);
     }
+
+    // Build the `Tileset` (calculate the adjacency rules).
+    let tileset = tileset_builder.build();
 
     // Delete all files in the output directory.
     if config.output_dir.exists() {
@@ -87,14 +103,7 @@ fn main() {
             )
         });
     }
-
-    // Save the tileset to the output directory.
-    tileset_builder
+    tileset
         .save(&config.output_dir)
-        .unwrap_or_else(|_| {
-            panic!(
-                "Failed to save tileset builder to {}.",
-                config.output_dir.display()
-            )
-        });
+        .expect("Failed to save tileset");
 }
