@@ -1,99 +1,86 @@
 use anyhow::{Result, anyhow};
-use bitvec::prelude::*;
+use fixedbitset::FixedBitSet;
+use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::Array2;
-use photo::Direction;
 use rand::{
     Rng,
     distr::{Distribution, weighted::WeightedIndex},
 };
-use std::{
-    cmp::Ordering,
-    collections::{BinaryHeap, VecDeque},
-};
-
-const NEIGHBOURS: &[(isize, isize)] = &[(0, -1), (1, 0), (0, 1), (-1, 0)];
+use std::collections::VecDeque;
 
 use crate::{Map, Tile, Tileset};
 
+const NEIGHBOURS: &[(isize, isize, usize)] = &[
+    (-1, 0, 0), // North
+    (0, 1, 1),  // East
+    (1, 0, 2),  // South
+    (0, -1, 3), // West
+];
+
 pub struct WaveFunction<'a> {
-    possibilities: Array2<BitVec>,
+    possibilities: Array2<FixedBitSet>,
     mask: Array2<bool>,
     tileset: &'a Tileset,
 }
 
 impl<'a> WaveFunction<'a> {
     pub fn new(map: &Map, tileset: &'a Tileset) -> Self {
-        debug_assert!(map.max_index().is_some(), "Map must have a maximum index");
-        debug_assert!(
-            map.max_index().unwrap() < tileset.len(),
-            "Map index out of bounds for tileset"
-        );
+        let ntiles = tileset.len();
+        let shape = map.tiles().dim();
+        // start all-ones
+        let mut poss = Array2::from_shape_fn(shape, |_| {
+            let mut bs = FixedBitSet::with_capacity(ntiles);
+            bs.insert_range(0..ntiles);
+            bs
+        });
+        let mut mask = map.tiles().mapv(|t| !matches!(t, Tile::Ignore));
 
-        Self {
-            possibilities: map.tiles().mapv(|tile| match tile {
-                Tile::Fixed(n) => {
-                    let mut p = bitvec![0; tileset.len()];
-                    p.set(n, true);
-                    p
-                }
-                _ => bitvec![1; tileset.len()],
-            }),
-            mask: map.tiles().mapv(|tile| match tile {
-                Tile::Ignore => false,
-                _ => true,
-            }),
+        // honour fixed tiles
+        for ((x, y), tile) in map.tiles().indexed_iter() {
+            if let Tile::Fixed(i) = tile {
+                let mut bs = FixedBitSet::with_capacity(ntiles);
+                bs.insert(*i);
+                poss[(x, y)] = bs;
+                mask[(x, y)] = true;
+            }
+        }
+
+        WaveFunction {
+            possibilities: poss,
+            mask,
             tileset,
         }
     }
 
-    /// Constraint propagation using AC-3.
     pub fn ac3(&mut self) -> Result<()> {
-        let (width, height) = self.possibilities.dim();
+        let (height, width) = self.possibilities.dim();
         let mut queue = VecDeque::new();
-
-        // Initialize the queue only for non-wildcard cells.
         for y in 0..height {
             for x in 0..width {
-                // Skip arcs from or to wildcard cells.
-                if !self.mask[(x, y)] {
+                if !self.mask[(y, x)] {
                     continue;
                 }
-                for &(dy, dx) in NEIGHBOURS {
-                    let ny = y as isize + dy;
-                    let nx = x as isize + dx;
-                    if ny >= 0 && nx >= 0 && ny < height as isize && nx < width as isize {
-                        if !self.mask[(nx as usize, ny as usize)] {
-                            continue;
-                        }
-                        queue.push_back(((y, x), ((ny as usize, nx as usize), (dy, dx))));
+                for &(dy, dx, dir) in NEIGHBOURS {
+                    let ny = (y as isize + dy) as usize;
+                    let nx = (x as isize + dx) as usize;
+                    if ny < height && nx < width && self.mask[(ny, nx)] {
+                        queue.push_back(((y, x), (ny, nx, dir)));
                     }
                 }
             }
         }
 
-        while let Some(((y, x), ((ny, nx), (dy, dx)))) = queue.pop_front() {
-            if self.revise((y, x), (ny, nx), (dy, dx))? {
-                if self.possibilities[(y, x)].not_any() {
-                    return Err(anyhow!(
-                        "AC-3 failed: cell ({},{}) has no valid possibilities.",
-                        x,
-                        y
-                    ));
+        while let Some(((y, x), (ny, nx, dir))) = queue.pop_front() {
+            if self.revise((y, x), (ny, nx), dir)? {
+                if self.possibilities[(y, x)].is_empty() {
+                    return Err(anyhow!("AC‑3 failed: ({},{}) no possibilities", x, y));
                 }
-                for &(ddy, ddx) in NEIGHBOURS {
-                    let py = y as isize + ddy;
-                    let px = x as isize + ddx;
-                    if py >= 0 && px >= 0 && py < height as isize && px < width as isize {
-                        if (py as usize, px as usize) == (ny, nx) {
-                            continue;
-                        }
-                        if !self.mask[(px as usize, py as usize)] {
-                            continue;
-                        }
-                        queue.push_back((
-                            (py as usize, px as usize),
-                            ((y, x), ((y as isize - py), (x as isize - px))),
-                        ));
+                for &(ddy, ddx, dir2) in NEIGHBOURS {
+                    let py = (y as isize + ddy) as usize;
+                    let px = (x as isize + ddx) as usize;
+                    if py < height && px < width && (py, px) != (ny, nx) && self.mask[(py, px)] {
+                        let opposite = (dir2 + 2) & 3;
+                        queue.push_back(((py, px), (y, x, opposite)));
                     }
                 }
             }
@@ -101,64 +88,57 @@ impl<'a> WaveFunction<'a> {
         Ok(())
     }
 
-    /// Revise constraints between two cells.
-    /// If either cell is a wildcard then no revision is necessary.
     fn revise(
         &mut self,
-        pos: (usize, usize),
-        n: (usize, usize),
-        delta: (isize, isize),
+        (y, x): (usize, usize),
+        (ny, nx): (usize, usize),
+        dir: usize,
     ) -> Result<bool> {
-        let (y, x) = pos;
-        let (ny, nx) = n;
-
-        // Skip revision if either cell is a wildcard.
-        if !self.mask[(x, y)] || !self.mask[(nx, ny)] {
+        if !self.mask[(y, x)] || !self.mask[(ny, nx)] {
             return Ok(false);
         }
 
-        let mut revised = false;
-        let num_tiles = self.tileset.len();
-        let direction = match delta {
-            (-1, 0) => Direction::North,
-            (1, 0) => Direction::South,
-            (0, 1) => Direction::East,
-            (0, -1) => Direction::West,
-            _ => panic!("Invalid direction"),
+        // 1) Grab the contiguous slice and compute linear indices:
+        let (_, width) = self.possibilities.dim();
+        let slice = self.possibilities.as_slice_mut().unwrap();
+        let idx = y * width + x;
+        let nidx = ny * width + nx;
+
+        // 2) Split at the later index so we can get two borrows:
+        let (cell, neigh): (&mut FixedBitSet, &FixedBitSet) = if idx <= nidx {
+            let (left, right) = slice.split_at_mut(nidx);
+            (&mut left[idx], &right[0])
+        } else {
+            let (left, right) = slice.split_at_mut(idx);
+            (&mut right[0], &left[nidx])
         };
 
-        for tile in 0..num_tiles {
-            if !self.possibilities[(y, x)][tile] {
-                continue;
-            }
-            let allowed_mask: &BitVec = &self.tileset.rules()[tile][direction.index::<usize>()];
-            let neighbor_possibilities = &self.possibilities[(ny, nx)];
-            if !allowed_mask
-                .iter()
-                .zip(neighbor_possibilities.iter())
-                .any(|(allowed, possible)| *allowed && *possible)
-            {
-                self.possibilities[(y, x)].set(tile, false);
-                revised = true;
+        // 3) Intersection check:
+        let rules = self.tileset.rules().masks();
+        let mut changed = false;
+        for tile in cell.ones().collect::<Vec<_>>() {
+            let allowed = &rules[tile][dir];
+            if allowed.intersection(neigh).next().is_none() {
+                cell.set(tile, false);
+                changed = true;
             }
         }
-        Ok(revised)
+        Ok(changed)
     }
 
-    /// A cell is considered collapsed if it either is a wildcard or has exactly one possibility.
     fn all_collapsed(&self) -> bool {
         self.possibilities
             .indexed_iter()
-            .all(|((x, y), poss)| !self.mask[(x, y)] || poss.iter().filter(|b| **b).count() == 1)
+            .all(|((x, y), bs)| !self.mask[(x, y)] || bs.count_ones(..) == 1)
     }
 
-    /// Collapse the wave function.
     pub fn collapse<R: Rng>(&mut self, rng: &mut R) -> Result<Map> {
-        use indicatif::{ProgressBar, ProgressStyle};
-        let (width, height) = self.possibilities.dim();
-        let total_cells = width * height;
-        let progress_bar = ProgressBar::new(total_cells as u64);
-        progress_bar.set_style(
+        // 1) Initial propagation
+        self.ac3()?;
+
+        let (height, width) = self.possibilities.dim();
+        let total = (height * width) as u64;
+        let pb = ProgressBar::new(total).with_style(
             ProgressStyle::default_bar()
                 .template(
                     "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
@@ -166,134 +146,53 @@ impl<'a> WaveFunction<'a> {
                 .progress_chars("#>-"),
         );
 
-        let mut heap = BinaryHeap::new();
+        // 2) As long as something is unfixed…
+        while !self.all_collapsed() {
+            // find the cell with minimum entropy >1
+            let ((row, col), _) = self
+                .possibilities
+                .indexed_iter()
+                .filter(|((r, c), bs)| self.mask[(*r, *c)] && bs.count_ones(..) > 1)
+                .min_by_key(|(_, bs)| bs.count_ones(..))
+                .expect("should have at least one unfixed cell");
 
-        // Only process non-wildcard cells.
-        for ((x, y), poss) in self.possibilities.indexed_iter() {
-            if !self.mask[(x, y)] {
-                progress_bar.inc(1);
-                continue;
-            }
-            let count = poss.iter().filter(|b| **b).count();
-            if count > 1 {
-                heap.push(Cell {
-                    entropy: count,
-                    x,
-                    y,
-                });
-            } else {
-                progress_bar.inc(1);
-            }
-        }
-
-        while let Some(cell) = heap.pop() {
-            let (x, y) = (cell.x, cell.y);
-            let current_entropy = self.possibilities[(x, y)].iter().filter(|b| **b).count();
-
-            if current_entropy == 0 {
-                return Err(anyhow!("Cell ({},{}) has no possibilities", x, y));
-            }
-            if current_entropy == 1 {
-                continue;
-            }
-            if current_entropy != cell.entropy {
-                heap.push(Cell {
-                    entropy: current_entropy,
-                    x,
-                    y,
-                });
-                continue;
-            }
-
-            let options: Vec<usize> = self.possibilities[(x, y)]
+            // the vector of possible tiles and their weights
+            let opts = self.possibilities[(row, col)].ones().collect::<Vec<_>>();
+            let weights = opts
                 .iter()
-                .enumerate()
-                .filter(|(_, possible)| **possible)
-                .map(|(i, _)| i)
-                .collect();
-            let weights: Vec<usize> = options
-                .iter()
-                .map(|&tile| self.tileset.frequency(tile))
-                .collect();
-            let dist = WeightedIndex::new(&weights)
-                .map_err(|e| anyhow!("Weighted distribution error: {}", e))?;
-            let selected = options[dist.sample(rng)];
+                .map(|&t| self.tileset.frequency(t))
+                .collect::<Vec<_>>();
 
-            for i in 0..self.possibilities[(x, y)].len() {
-                self.possibilities[(x, y)].set(i, i == selected);
-            }
-            progress_bar.inc(1);
+            // pick one at random
+            let dist = WeightedIndex::new(&weights).map_err(|e| anyhow!(e))?;
+            let pick = opts[dist.sample(rng)];
+
+            // collapse that cell to exactly 'pick'
+            let mut bs = FixedBitSet::with_capacity(self.tileset.len());
+            bs.insert(pick);
+            self.possibilities[(row, col)] = bs;
+
+            pb.inc(1);
+
+            // propagate constraints again
             self.ac3()?;
-
-            // Update only non-wildcard neighbors.
-            for &(dx, dy) in NEIGHBOURS {
-                let nx = x as isize + dx;
-                let ny = y as isize + dy;
-                if nx >= 0 && ny >= 0 && nx < width as isize && ny < height as isize {
-                    let (nx, ny) = (nx as usize, ny as usize);
-                    if !self.mask[(nx, ny)] {
-                        continue;
-                    }
-                    let count = self.possibilities[(nx, ny)].iter().filter(|b| **b).count();
-                    if count > 1 {
-                        heap.push(Cell {
-                            entropy: count,
-                            x: nx,
-                            y: ny,
-                        });
-                    }
-                }
-            }
-        }
-        progress_bar.finish();
-
-        if !self.all_collapsed() {
-            return Err(anyhow!("Not all tiles collapsed after optimization."));
         }
 
+        pb.finish();
+
+        // 3) Build the final map (should never fail)
         let tiles = self
             .possibilities
-            .indexed_iter()
-            .map(|((x, y), poss)| {
-                let selected = poss
-                    .iter()
-                    .enumerate()
-                    .find(|(_, b)| **b)
-                    .ok_or_else(|| anyhow!("No tile selected at ({}, {})", x, y))?
-                    .0;
-                Ok(selected)
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let tiles = Array2::from_shape_vec(
+            .iter()
+            .map(|bs| bs.ones().next().expect("each cell has exactly one choice"))
+            .collect::<Vec<_>>();
+
+        let arr = Array2::from_shape_vec(
             (height, width),
-            tiles.into_iter().map(|tile| Tile::Fixed(tile)).collect(),
+            tiles.into_iter().map(Tile::Fixed).collect(),
         )
-        .map_err(|e| anyhow!("Failed to create tiles array: {}", e))?;
+        .map_err(|e: ndarray::ShapeError| anyhow!(e))?;
 
-        Ok(Map::new(tiles))
-    }
-}
-
-/// Helper struct for the BinaryHeap.
-#[derive(Copy, Clone, Eq, PartialEq)]
-struct Cell {
-    entropy: usize,
-    x: usize,
-    y: usize,
-}
-
-impl Ord for Cell {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other
-            .entropy
-            .cmp(&self.entropy)
-            .then_with(|| self.x.cmp(&other.x))
-            .then_with(|| self.y.cmp(&other.y))
-    }
-}
-
-impl PartialOrd for Cell {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+        Ok(Map::new(arr))
     }
 }

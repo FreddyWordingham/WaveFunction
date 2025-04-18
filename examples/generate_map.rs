@@ -52,13 +52,34 @@ fn main() {
     }
 
     let resolution = (100, 100);
-    let mut map = Map::empty(resolution);
-    map.set((0, 0), Tile::Fixed(1));
-    map.set((9, 9), Tile::Ignore);
+    let mut template = Map::empty(resolution);
+    template.set((0, 0), Tile::Fixed(1));
+    template.set((9, 9), Tile::Ignore);
 
     let mut rng = rng();
-    let mut wf = WaveFunction::new(&map, &tileset);
-    let collapsed_map = wf.collapse(&mut rng).expect("Failed to collapse map");
+
+    // retry loop
+    let collapsed_map = (0..100)
+        .filter_map(|attempt| {
+            let mut wf = WaveFunction::new(&template, &tileset);
+            // propagate fixed/ignore constraints
+            if let Err(e) = wf.ac3() {
+                eprintln!("AC‑3 failed on attempt {}: {}", attempt + 1, e);
+                return None;
+            }
+            match wf.collapse(&mut rng) {
+                Ok(map) => {
+                    println!("WFC succeeded on attempt {}", attempt + 1);
+                    Some(map)
+                }
+                Err(e) => {
+                    eprintln!("WFC failed on attempt {}: {}", attempt + 1, e);
+                    None
+                }
+            }
+        })
+        .next()
+        .expect("All WFC attempts failed");
 
     let img = collapsed_map.render(&tileset);
     img.save(&config.output_filepath)
