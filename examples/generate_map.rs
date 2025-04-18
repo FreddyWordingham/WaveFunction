@@ -51,7 +51,7 @@ fn main() {
         print_tileset_images(&tileset);
     }
 
-    let resolution = (100, 100);
+    let resolution = (1250, 1250);
     let mut template = Map::empty(resolution);
     template.set((0, 0), Tile::Fixed(1));
     template.set((9, 9), Tile::Ignore);
@@ -62,12 +62,7 @@ fn main() {
     let collapsed_map = (0..100)
         .filter_map(|attempt| {
             let mut wf = WaveFunction::new(&template, &tileset);
-            // propagate fixed/ignore constraints
-            if let Err(e) = wf.ac3() {
-                eprintln!("AC‑3 failed on attempt {}: {}", attempt + 1, e);
-                return None;
-            }
-            match wf.collapse(&mut rng) {
+            match wf.collapse(&mut rng, &tileset) {
                 Ok(map) => {
                     println!("WFC succeeded on attempt {}", attempt + 1);
                     Some(map)
