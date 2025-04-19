@@ -2,7 +2,7 @@ use clap::Parser;
 use photo::ImageRGBA;
 use rand::rng;
 use std::path::PathBuf;
-use wave_function::{Map, Tile, Tileset, WaveFunction};
+use wave_function::{Cell, Map, Tileset, WaveFunction};
 
 /// Image processing configuration.
 #[derive(Parser, Debug)]
@@ -51,30 +51,15 @@ fn main() {
         print_tileset_images(&tileset);
     }
 
-    let resolution = (200, 200);
+    let resolution = (50, 50);
     let mut template = Map::empty(resolution);
-    template.set((0, 0), Tile::Fixed(1));
-    template.set((9, 9), Tile::Ignore);
+    template.set((0, 0), Cell::Fixed(1));
+    template.set((9, 9), Cell::Ignore);
 
     let mut rng = rng();
 
     // retry loop
-    let collapsed_map = (0..1000)
-        .filter_map(|attempt| {
-            let mut wf: WaveFunction = WaveFunction::new(&template, &tileset);
-            match wf.collapse(&mut rng, &tileset) {
-                Ok(map) => {
-                    println!("WFC succeeded on attempt {}", attempt + 1);
-                    Some(map)
-                }
-                Err(e) => {
-                    eprintln!("WFC failed on attempt {}: {}", attempt + 1, e);
-                    None
-                }
-            }
-        })
-        .next()
-        .expect("All WFC attempts failed");
+    let collapsed_map = WaveFunction::new(&template, tileset.rules()).collapse(&mut rng);
 
     let img = collapsed_map.render(&tileset);
     img.save(&config.output_filepath)
