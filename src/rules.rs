@@ -8,29 +8,33 @@ pub struct Rules {
 }
 
 impl Rules {
-    pub fn new(adj: Array3<bool>) -> Self {
-        let n = adj.shape()[0];
-        assert_eq!(adj.shape(), &[n, n, 2], "Adjacency must be n×n×2");
+    pub fn new(adjacency_matrix: Array3<bool>) -> Self {
+        let num_tiles = adjacency_matrix.shape()[0];
+        assert_eq!(
+            adjacency_matrix.shape(),
+            &[num_tiles, num_tiles, 2],
+            "Adjacency matrix must be shape [n, n, 2]"
+        );
 
-        let mut masks = Vec::with_capacity(n);
-        for t in 0..n {
+        let mut masks = Vec::with_capacity(num_tiles);
+        for j in 0..num_tiles {
             let mut dirs = [
-                FixedBitSet::with_capacity(n),
-                FixedBitSet::with_capacity(n),
-                FixedBitSet::with_capacity(n),
-                FixedBitSet::with_capacity(n),
+                FixedBitSet::with_capacity(num_tiles),
+                FixedBitSet::with_capacity(num_tiles),
+                FixedBitSet::with_capacity(num_tiles),
+                FixedBitSet::with_capacity(num_tiles),
             ];
-            for i in 0..n {
-                if adj[[t, i, 1]] {
+            for i in 0..num_tiles {
+                if adjacency_matrix[[j, i, 1]] {
                     dirs[Direction::North.index::<usize>()].insert(i);
                 }
-                if adj[[t, i, 0]] {
+                if adjacency_matrix[[j, i, 0]] {
                     dirs[Direction::East.index::<usize>()].insert(i);
                 }
-                if adj[[i, t, 1]] {
+                if adjacency_matrix[[i, j, 1]] {
                     dirs[Direction::South.index::<usize>()].insert(i);
                 }
-                if adj[[i, t, 0]] {
+                if adjacency_matrix[[i, j, 0]] {
                     dirs[Direction::West.index::<usize>()].insert(i);
                 }
             }
@@ -48,15 +52,15 @@ impl Rules {
     }
 
     pub fn adjacency_matrix(&self) -> Array3<bool> {
-        let n = self.len();
-        let mut m = Array3::from_elem((n, n, 2), false);
-        for i in 0..n {
-            for j in 0..n {
-                m[[i, j, 0]] = self.masks[i][Direction::East.index::<usize>()].contains(j);
-                m[[i, j, 1]] = self.masks[j][Direction::North.index::<usize>()].contains(i);
+        let num_tiles = self.len();
+        let mut matrix = Array3::from_elem((num_tiles, num_tiles, 2), false);
+        for i in 0..num_tiles {
+            for j in 0..num_tiles {
+                matrix[[i, j, 0]] = self.masks[i][Direction::East.index::<usize>()].contains(j);
+                matrix[[i, j, 1]] = self.masks[j][Direction::North.index::<usize>()].contains(i);
             }
         }
-        m
+        matrix
     }
 }
 

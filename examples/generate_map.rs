@@ -51,7 +51,7 @@ fn main() {
         print_tileset_images(&tileset);
     }
 
-    let resolution = (1250, 1250);
+    let resolution = (200, 200);
     let mut template = Map::empty(resolution);
     template.set((0, 0), Tile::Fixed(1));
     template.set((9, 9), Tile::Ignore);
@@ -59,9 +59,9 @@ fn main() {
     let mut rng = rng();
 
     // retry loop
-    let collapsed_map = (0..100)
+    let collapsed_map = (0..1000)
         .filter_map(|attempt| {
-            let mut wf = WaveFunction::new(&template, &tileset);
+            let mut wf: WaveFunction = WaveFunction::new(&template, &tileset);
             match wf.collapse(&mut rng, &tileset) {
                 Ok(map) => {
                     println!("WFC succeeded on attempt {}", attempt + 1);
