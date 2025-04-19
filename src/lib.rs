@@ -13,16 +13,16 @@
 #![allow(clippy::cast_sign_loss)]
 #![allow(unreachable_code)]
 
+mod cell;
 mod map;
 mod rules;
-mod tile;
 mod tileset;
 mod tileset_builder;
 mod wave_function;
 
+pub use cell::Cell;
 pub use map::Map;
 pub use rules::Rules;
-pub use tile::Tile;
 pub use tileset::Tileset;
 pub use tileset_builder::TilesetBuilder;
 pub use wave_function::WaveFunction;
