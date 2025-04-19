@@ -59,7 +59,8 @@ fn main() {
     let mut rng = rng();
 
     // retry loop
-    let collapsed_map = WaveFunction::new(&template, tileset.rules()).collapse(&mut rng);
+    let collapsed_map =
+        WaveFunction::new(&template, tileset.rules()).collapse(&mut rng, &tileset.weights());
 
     let img = collapsed_map.render(&tileset);
     img.save(&config.output_filepath)

@@ -166,6 +166,10 @@ impl Tileset {
         &self.tiles
     }
 
+    pub fn weights(&self) -> Vec<usize> {
+        self.tiles.iter().map(|tile| tile.1).collect::<Vec<_>>()
+    }
+
     pub fn rules(&self) -> &Rules {
         &self.rules
     }

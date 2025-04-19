@@ -2,7 +2,10 @@ use fixedbitset::FixedBitSet;
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::Array2;
 use photo::{ALL_DIRECTIONS, Direction};
-use rand::{Rng, prelude::IndexedRandom};
+use rand::{
+    Rng,
+    distr::{Distribution, weighted::WeightedIndex},
+};
 use std::collections::VecDeque;
 
 use crate::{Cell, Map, Rules};
@@ -102,48 +105,51 @@ impl<'a> WaveFunction<'a> {
     }
 
     /// Collapse into a concrete Map.
-    pub fn collapse<R: Rng>(&mut self, rng: &mut R) -> Map {
+    pub fn collapse<R: Rng>(&mut self, rng: &mut R, weights: &[usize]) -> Map {
+        assert!(weights.len() == self.rules.len());
+
         let (height, width) = self.possibilities.dim();
-        let total_cells = (height * width) as u64;
-        // Count how many are already fixed
+        let total = (height * width) as u64;
         let mut fixed = self
             .possibilities
             .iter()
-            .filter(|bits| bits.count_ones(..) == 1)
+            .filter(|b| b.count_ones(..) == 1)
             .count() as u64;
 
-        // create and style the bar
-        let pb = ProgressBar::new(total_cells);
+        let pb = ProgressBar::new(total);
         pb.set_position(fixed);
         pb.set_style(
             ProgressStyle::default_bar()
                 .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({eta})")
-                .expect("Failed to construct progress bar")
+                .unwrap()
                 .progress_chars("##-"),
         );
 
-        // main WFC loop
         loop {
             self.propagate_ac3();
 
-            // pick next cell with >1 options
-            let mut best: Option<((usize, usize), usize)> = None;
+            // pick lowest‑entropy cell
+            let mut next: Option<((usize, usize), usize)> = None;
             for ((y, x), bits) in self.possibilities.indexed_iter() {
-                let count = bits.count_ones(..);
-                if count > 1 {
-                    if best.as_ref().map_or(true, |&(_, c)| count < c) {
-                        best = Some(((y, x), count));
-                    }
+                let c = bits.count_ones(..);
+                if c > 1 && next.as_ref().map_or(true, |&(_, old)| c < old) {
+                    next = Some(((y, x), c));
                 }
             }
 
-            if let Some(((y, x), _)) = best {
-                // collapse it
+            if let Some(((y, x), _)) = next {
+                // gather choices & their weights
                 let choices: Vec<usize> = self.possibilities[(y, x)].ones().collect();
-                let &pick = choices.choose(rng).unwrap();
-                let mut mask = FixedBitSet::with_capacity(self.rules.len());
-                mask.insert(pick);
-                self.possibilities[(y, x)] = mask;
+                let w: Vec<f64> = choices.iter().map(|&i| weights[i] as f64).collect();
+                // build weighted distribution
+                let dist = WeightedIndex::new(&w).unwrap();
+                let pick = choices[dist.sample(rng)];
+
+                // fix it
+                let mut m = FixedBitSet::with_capacity(self.rules.len());
+                m.insert(pick);
+                self.possibilities[(y, x)] = m;
+
                 fixed += 1;
                 pb.inc(1);
             } else {
@@ -153,11 +159,11 @@ impl<'a> WaveFunction<'a> {
 
         pb.finish_with_message("Done!");
 
-        // build final Map
-        let cells = Array2::from_shape_fn((height, width), |i| {
-            let mut ones = self.possibilities[i].ones();
-            match (ones.next(), ones.next()) {
-                (Some(n), None) => Cell::Fixed(n),
+        // reconstruct final Map
+        let cells = Array2::from_shape_fn((height, width), |idx| {
+            let mut iter = self.possibilities[idx].ones();
+            match (iter.next(), iter.next()) {
+                (Some(i), None) => Cell::Fixed(i),
                 _ => Cell::Wildcard,
             }
         });
