@@ -12,7 +12,7 @@ const ADJACENCY_VALID_SYMBOL: &str = "1";
 pub struct Tileset {
     interior_size: usize,
     border_size: usize,
-    tiles: Vec<(ImageRGBA<u8>, usize)>,
+    tiles: Vec<ImageRGBA<u8>>,
     rules: Rules,
 }
 
@@ -20,7 +20,7 @@ impl Tileset {
     pub fn new(
         interior_size: usize,
         border_size: usize,
-        tiles: Vec<(ImageRGBA<u8>, usize)>,
+        tiles: Vec<ImageRGBA<u8>>,
         rules: Rules,
     ) -> Self {
         debug_assert!(interior_size > 0, "Interior size must be greater than 0");
@@ -54,6 +54,7 @@ impl Tileset {
 
         let num_tiles = lines.len();
         let mut tiles = Vec::with_capacity(num_tiles);
+        let mut frequencies = Vec::with_capacity(num_tiles);
         let mut adjacency_matrix = Array3::from_elem((num_tiles, num_tiles, 2), false);
 
         for (n, line) in lines.iter().enumerate() {
@@ -64,7 +65,8 @@ impl Tileset {
 
             let tile = ImageRGBA::<u8>::load(parts[0]).expect("Failed to load tile image");
             let frequency = parts[1].parse::<usize>().expect("Invalid frequency");
-            tiles.push((tile, frequency));
+            tiles.push(tile);
+            frequencies.push(frequency);
 
             // Parse the adjacency matrix
             for i in 0..num_tiles {
@@ -79,7 +81,7 @@ impl Tileset {
             interior_size,
             border_size,
             tiles,
-            rules: Rules::new(adjacency_matrix),
+            rules: Rules::new(adjacency_matrix, frequencies),
         }
     }
 
@@ -104,6 +106,7 @@ impl Tileset {
         // Calculate the print widths for the index and frequency
         let index_print_width = self.tiles.len().to_string().len();
         let frequency_print_width = self
+            .rules
             .max_frequency()
             .expect("No tiles found")
             .to_string()
@@ -115,7 +118,7 @@ impl Tileset {
         // Save the frequencies and tiles to the specified directory
         let frequencies_path = path.join(TILESET_FILENAME);
         let mut frequencies_file = std::fs::File::create(frequencies_path)?;
-        for (i, (tile, frequency)) in self.tiles.iter().enumerate() {
+        for (i, (tile, frequency)) in self.tiles.iter().zip(self.rules.frequencies()).enumerate() {
             let tile_filename = format!("{i:0index_print_width$}.png");
             let tile_path = path.join(&tile_filename);
             tile.save(&tile_path)?;
@@ -162,36 +165,18 @@ impl Tileset {
         self.tiles.len()
     }
 
-    pub fn tiles(&self) -> &[(ImageRGBA<u8>, usize)] {
+    pub fn tiles(&self) -> &[ImageRGBA<u8>] {
         &self.tiles
-    }
-
-    pub fn weights(&self) -> Vec<usize> {
-        self.tiles.iter().map(|tile| tile.1).collect::<Vec<_>>()
     }
 
     pub fn rules(&self) -> &Rules {
         &self.rules
     }
 
-    pub fn frequency(&self, index: usize) -> usize {
-        debug_assert!(
-            index < self.tiles.len(),
-            "Index out of bounds: {} >= {}",
-            index,
-            self.tiles.len()
-        );
-        self.tiles[index].1
-    }
-
-    fn max_frequency(&self) -> Option<usize> {
-        self.tiles.iter().map(|tile| tile.1).max()
-    }
-
     pub fn interiors(&self) -> Vec<ImageRGBA<u8>> {
         self.tiles
             .iter()
-            .map(|tile| tile.0.interior(self.border_size))
+            .map(|tile| tile.interior(self.border_size))
             .collect()
     }
 }

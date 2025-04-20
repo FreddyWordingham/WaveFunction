@@ -6,7 +6,8 @@ use crate::{Rules, Tileset};
 pub struct TilesetBuilder {
     interior_size: usize,
     border_size: usize,
-    tiles: Vec<(ImageRGBA<u8>, usize)>,
+    tiles: Vec<ImageRGBA<u8>>,
+    frequencies: Vec<usize>,
 }
 
 impl TilesetBuilder {
@@ -17,6 +18,7 @@ impl TilesetBuilder {
             interior_size,
             border_size,
             tiles: Vec::new(),
+            frequencies: Vec::new(),
         }
     }
 
@@ -28,8 +30,12 @@ impl TilesetBuilder {
         self.border_size
     }
 
-    pub fn tiles(&self) -> &[(ImageRGBA<u8>, usize)] {
+    pub fn tiles(&self) -> &[ImageRGBA<u8>] {
         &self.tiles
+    }
+
+    pub fn frequencies(&self) -> &[usize] {
+        &self.frequencies
     }
 
     pub fn tile_size(&self) -> usize {
@@ -48,13 +54,13 @@ impl TilesetBuilder {
         let mut adjacent = Array3::from_elem((self.len(), self.len(), 2), false);
         for (self_index, self_tile) in self.tiles.iter().enumerate() {
             for (other_index, other_tile) in self.tiles.iter().enumerate() {
-                if self_tile.0.view_border(Direction::East, self.border_size)
-                    == other_tile.0.view_border(Direction::West, self.border_size)
+                if self_tile.view_border(Direction::East, self.border_size)
+                    == other_tile.view_border(Direction::West, self.border_size)
                 {
                     adjacent[[self_index, other_index, 0]] = true;
                 }
-                if self_tile.0.view_border(Direction::North, self.border_size)
-                    == other_tile.0.view_border(Direction::South, self.border_size)
+                if self_tile.view_border(Direction::North, self.border_size)
+                    == other_tile.view_border(Direction::South, self.border_size)
                 {
                     adjacent[[self_index, other_index, 1]] = true;
                 }
@@ -75,14 +81,16 @@ impl TilesetBuilder {
                 if let Some(index) = self
                     .tiles
                     .iter()
-                    .position(|tile| tile.0 == transformed_image)
+                    .position(|tile| tile == &transformed_image)
                 {
-                    self.tiles[index].1 += 1;
+                    self.frequencies[index] += 1;
                 } else {
-                    self.tiles.push((transformed_image, 1));
+                    self.tiles.push(transformed_image);
+                    self.frequencies.push(1);
                 }
             }
         }
+        assert!(self.frequencies.len() == self.tiles.len());
         self
     }
 
@@ -91,7 +99,7 @@ impl TilesetBuilder {
             !self.tiles.is_empty(),
             "TilesetBuilder must contain at least one tile before it can be built"
         );
-        let rules = Rules::new(self.adjacency_matrix());
+        let rules = Rules::new(self.adjacency_matrix(), self.frequencies);
         Tileset::new(self.interior_size, self.border_size, self.tiles, rules)
     }
 }

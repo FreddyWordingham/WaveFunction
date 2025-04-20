@@ -51,7 +51,7 @@ fn main() {
         print_tileset_images(&tileset);
     }
 
-    let resolution = (1000, 1000);
+    let resolution = (150, 150);
     let mut template = Map::empty(resolution);
     template.set((0, 0), Cell::Fixed(1));
     template.set((9, 9), Cell::Ignore);

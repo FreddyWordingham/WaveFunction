@@ -1,5 +1,5 @@
 cargo run --example cut_tiles -- \
-    --input-image input/complex.png \
+    --input-image input/settlement.png \
     --output-dir output/tiles/ \
     --overlap 2 \
     --tile-size 3 \
