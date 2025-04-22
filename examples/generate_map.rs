@@ -2,7 +2,7 @@ use clap::Parser;
 use photo::ImageRGBA;
 use rand::rng;
 use std::path::PathBuf;
-use wave_function::{Cell, Map, Tileset, WaveFunction};
+use wave_function::{Map, Tileset, WaveFunctionWithBacktracking};
 
 /// Image processing configuration.
 #[derive(Parser, Debug)]
@@ -29,7 +29,9 @@ fn print_tileset_images(tileset: &Tileset) {
         &tileset
             .tiles()
             .iter()
-            .map(|tile| (&tile.0, tile.1.to_string()))
+            .zip(tileset.rules().frequencies())
+            .enumerate()
+            .map(|(i, (tile, frequency))| (tile, format!("{} ({})", i, frequency)))
             .collect::<Vec<_>>(),
         1,
     )
@@ -52,15 +54,20 @@ fn main() {
     }
 
     let resolution = (150, 150);
-    let mut template = Map::empty(resolution);
-    template.set((0, 0), Cell::Fixed(1));
-    template.set((9, 9), Cell::Ignore);
+    let template = Map::empty(resolution);
+    // template.set((0, 0), Cell::Fixed(1));
+
+    // for i in 10..20 {
+    //     for j in 10..20 {
+    //         template.set((i, j), Cell::Fixed(131));
+    //     }
+    // }
 
     let mut rng = rng();
 
-    // retry loop
-    let collapsed_map =
-        WaveFunction::new(&template, tileset.rules()).collapse(&mut rng, &tileset.weights());
+    let collapsed_map = template
+        .collapse::<WaveFunctionWithBacktracking>(tileset.rules(), &mut rng)
+        .expect("Failed to collapse map");
 
     let img = collapsed_map.render(&tileset);
     img.save(&config.output_filepath)

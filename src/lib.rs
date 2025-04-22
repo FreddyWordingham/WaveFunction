@@ -13,6 +13,7 @@
 #![allow(clippy::cast_sign_loss)]
 #![allow(unreachable_code)]
 
+mod algorithm;
 mod cell;
 mod map;
 mod rules;
@@ -20,6 +21,7 @@ mod tileset;
 mod tileset_builder;
 mod wave_function;
 
+pub use algorithm::{WaveFunctionBasic, WaveFunctionOptimised, WaveFunctionWithBacktracking};
 pub use cell::Cell;
 pub use map::Map;
 pub use rules::Rules;

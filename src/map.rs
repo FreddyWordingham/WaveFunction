@@ -1,12 +1,14 @@
+use anyhow::Result;
 use ndarray::Array2;
 use photo::ImageRGBA;
+use rand::Rng;
 use std::{
     fmt::{Display, Formatter},
     fs::File,
     io::Write,
 };
 
-use crate::{Cell, Tileset};
+use crate::{Cell, Rules, Tileset, WaveFunction};
 
 const WILDCARD_COLOUR: [u8; 4] = [255, 0, 255, 255];
 const IGNORE_COLOUR: [u8; 4] = [0, 0, 0, 0];
@@ -101,6 +103,10 @@ impl Map {
             "Index out of bounds for map width"
         );
         self.cells[index] = cell;
+    }
+
+    pub fn collapse<WF: WaveFunction>(&self, rules: &Rules, rng: &mut impl Rng) -> Result<Self> {
+        WF::collapse(self, rules, rng)
     }
 
     pub fn render(&self, tileset: &Tileset) -> ImageRGBA<u8> {

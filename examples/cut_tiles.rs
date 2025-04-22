@@ -55,7 +55,9 @@ fn print_tileset_images(tileset_builder: &TilesetBuilder) {
         &tileset_builder
             .tiles()
             .iter()
-            .map(|tile| (&tile.0, tile.1.to_string()))
+            .zip(tileset_builder.frequencies())
+            .enumerate()
+            .map(|(i, (tile, frequency))| (tile, format!("{} ({})", i, frequency)))
             .collect::<Vec<_>>(),
         1,
     )

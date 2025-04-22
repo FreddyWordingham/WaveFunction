@@ -1,3 +1,8 @@
-pub struct WaveFunction {}
+use anyhow::Result;
+use rand::Rng;
 
-impl WaveFunction {}
+use crate::{Map, Rules};
+
+pub trait WaveFunction {
+    fn collapse(map: &Map, rules: &Rules, rng: &mut impl Rng) -> Result<Map>;
+}
