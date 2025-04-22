@@ -1,4 +1,5 @@
 use anyhow::Result;
+use fixedbitset::FixedBitSet;
 use ndarray::Array2;
 use photo::ImageRGBA;
 use rand::Rng;
@@ -78,8 +79,20 @@ impl Map {
             .max()
     }
 
-    pub fn cells(&self) -> &Array2<Cell> {
-        &self.cells
+    pub fn size(&self) -> (usize, usize) {
+        self.cells.dim()
+    }
+
+    pub fn mask(&self) -> Array2<bool> {
+        self.cells.mapv(|cell| match cell {
+            Cell::Ignore => false,
+            Cell::Wildcard => true,
+            Cell::Fixed(_) => true,
+        })
+    }
+
+    pub fn domains(&self, num_tiles: usize) -> Array2<FixedBitSet> {
+        self.cells.mapv(|cell| cell.domain(num_tiles))
     }
 
     pub fn collapse<WF: WaveFunction>(&self, rules: &Rules, rng: &mut impl Rng) -> Result<Self> {
@@ -93,18 +106,20 @@ impl Map {
         );
         let interiors = tileset.interiors();
         let interior_size = tileset.interior_size();
-        let wildcard = ImageRGBA::filled([interior_size, interior_size], WILDCARD_COLOUR);
-        let ignore = ImageRGBA::filled([interior_size, interior_size], IGNORE_COLOUR);
+        let wildcard_img = ImageRGBA::filled([interior_size, interior_size], WILDCARD_COLOUR);
+        let ignore_img = ImageRGBA::filled([interior_size, interior_size], IGNORE_COLOUR);
         let data = self.cells.mapv(|cell| match cell {
             Cell::Fixed(index) => interiors[index].clone(),
-            Cell::Ignore => ignore.clone(),
-            Cell::Wildcard => wildcard.clone(),
+            Cell::Ignore => ignore_img.clone(),
+            Cell::Wildcard => wildcard_img.clone(),
         });
 
+        // TODO: This is a temporary fix for the image rendering issue - we should not need to reverse the image horizontally
         let mut r_data = data.clone();
-        for i in 0..data.shape()[0] {
-            for j in 0..data.shape()[1] {
-                r_data[[data.shape()[0] - i - 1, j]] = data[[i, j]].clone();
+        let (height, width) = self.size();
+        for i in 0..height {
+            for j in 0..width {
+                r_data[[width - i - 1, j]] = data[[i, j]].clone();
             }
         }
 

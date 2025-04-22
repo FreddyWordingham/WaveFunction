@@ -1,13 +1,32 @@
+use fixedbitset::FixedBitSet;
 use std::fmt::{Display, Formatter};
 
 const CELL_IGNORE: &str = "!";
 const CELL_WILDCARD: &str = "*";
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Cell {
     Ignore,
     Wildcard,
     Fixed(usize),
+}
+
+impl Cell {
+    pub fn domain(&self, num_tiles: usize) -> FixedBitSet {
+        match self {
+            Cell::Ignore => FixedBitSet::with_capacity(num_tiles),
+            Cell::Wildcard => {
+                let mut bs = FixedBitSet::with_capacity(num_tiles);
+                bs.insert_range(..);
+                bs
+            }
+            Cell::Fixed(n) => {
+                let mut bs = FixedBitSet::with_capacity(num_tiles);
+                bs.insert(*n);
+                bs
+            }
+        }
+    }
 }
 
 impl Display for Cell {

@@ -33,10 +33,7 @@ impl WaveFunction for WaveFunctionOptimised {
     /// Collapses a map using the optimized Wave Function Collapse algorithm
     /// Returns a new map with all wildcards collapsed to fixed values.
     fn collapse(map: &Map, rules: &Rules, rng: &mut impl Rng) -> Result<Map> {
-        let (height, width) = {
-            let shape = map.cells().shape();
-            (shape[0], shape[1])
-        };
+        let (height, width) = map.size();
         let num_tiles = rules.len();
         let size = height * width;
 

@@ -49,10 +49,7 @@ impl WaveFunction for WaveFunctionWithBacktracking {
     /// Collapses a map using the optimized Wave Function Collapse algorithm with backtracking
     /// Returns a new map with all wildcards collapsed to fixed values.
     fn collapse(map: &Map, rules: &Rules, rng: &mut impl Rng) -> Result<Map> {
-        let (height, width) = {
-            let shape = map.cells().shape();
-            (shape[0], shape[1])
-        };
+        let (height, width) = map.size();
         let num_tiles = rules.len();
         let size = height * width;
 
