@@ -67,7 +67,7 @@ impl WaveFunction for WaveFunctionWithBacktracking {
         for idx in 0..size {
             let r = idx / width;
             let c = idx % width;
-            match map.get((r, c)) {
+            match map[(r, c)] {
                 Cell::Ignore => {
                     let bs = FixedBitSet::with_capacity(num_tiles);
                     domains.push(bs);
@@ -511,7 +511,7 @@ impl WaveFunction for WaveFunctionWithBacktracking {
                 let tile = bits[0]; // Get the first (and should be only) value
                 let r = idx / width;
                 let c = idx % width;
-                result.set((r, c), Cell::Fixed(tile));
+                result[(r, c)] = Cell::Fixed(tile);
             }
         }
 

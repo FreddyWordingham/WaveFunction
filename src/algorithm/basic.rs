@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use fixedbitset::FixedBitSet;
 use indicatif::{ProgressBar, ProgressStyle};
 use photo::Direction;
 use rand::distr::weighted::WeightedIndex;
@@ -23,24 +24,24 @@ impl WaveFunction for WaveFunctionBasic {
         let size = height * width;
 
         // Flattened domains; ignore cells get an empty bitset but are skipped below
-        let mut domains: Vec<fixedbitset::FixedBitSet> = Vec::with_capacity(size);
+        let mut domains: Vec<FixedBitSet> = Vec::with_capacity(size);
         let mut is_ignore = vec![false; size];
         for idx in 0..size {
             let r = idx / width;
             let c = idx % width;
-            match map.get((r, c)) {
+            match map[(r, c)] {
                 Cell::Ignore => {
-                    let bs = fixedbitset::FixedBitSet::with_capacity(num_tiles);
+                    let bs = FixedBitSet::with_capacity(num_tiles);
                     domains.push(bs);
                     is_ignore[idx] = true;
                 }
                 Cell::Wildcard => {
-                    let mut bs = fixedbitset::FixedBitSet::with_capacity(num_tiles);
+                    let mut bs = FixedBitSet::with_capacity(num_tiles);
                     bs.insert_range(..num_tiles);
                     domains.push(bs);
                 }
                 Cell::Fixed(i) => {
-                    let mut bs = fixedbitset::FixedBitSet::with_capacity(num_tiles);
+                    let mut bs = FixedBitSet::with_capacity(num_tiles);
                     bs.insert(i);
                     domains.push(bs);
                 }
@@ -69,7 +70,7 @@ impl WaveFunction for WaveFunctionBasic {
         };
 
         fn revise(
-            domains: &mut [fixedbitset::FixedBitSet],
+            domains: &mut [FixedBitSet],
             rules: &Rules,
             xi: usize,
             xj: usize,
@@ -205,7 +206,7 @@ impl WaveFunction for WaveFunctionBasic {
                 let tile = bits.next().unwrap(); // <-- pull the single value
                 let r = idx / width;
                 let c = idx % width;
-                result.set((r, c), Cell::Fixed(tile));
+                result[(r, c)] = Cell::Fixed(tile);
             }
         }
         Ok(result)

@@ -6,6 +6,7 @@ use std::{
     fmt::{Display, Formatter},
     fs::File,
     io::Write,
+    ops::{Index, IndexMut},
 };
 
 use crate::{Cell, Rules, Tileset, WaveFunction};
@@ -81,30 +82,6 @@ impl Map {
         &self.cells
     }
 
-    pub fn get(&self, index: (usize, usize)) -> Cell {
-        debug_assert!(
-            index.0 < self.cells.shape()[0],
-            "Index out of bounds for map height"
-        );
-        debug_assert!(
-            index.1 < self.cells.shape()[1],
-            "Index out of bounds for map width"
-        );
-        self.cells[index].clone()
-    }
-
-    pub fn set(&mut self, index: (usize, usize), cell: Cell) {
-        debug_assert!(
-            index.0 < self.cells.shape()[0],
-            "Index out of bounds for map height"
-        );
-        debug_assert!(
-            index.1 < self.cells.shape()[1],
-            "Index out of bounds for map width"
-        );
-        self.cells[index] = cell;
-    }
-
     pub fn collapse<WF: WaveFunction>(&self, rules: &Rules, rng: &mut impl Rng) -> Result<Self> {
         WF::collapse(self, rules, rng)
     }
@@ -132,6 +109,36 @@ impl Map {
         }
 
         ImageRGBA::from_tiles(&r_data)
+    }
+}
+
+impl Index<(usize, usize)> for Map {
+    type Output = Cell;
+
+    fn index(&self, idx: (usize, usize)) -> &Self::Output {
+        debug_assert!(
+            idx.0 < self.cells.shape()[0],
+            "Index out of bounds for map height"
+        );
+        debug_assert!(
+            idx.1 < self.cells.shape()[1],
+            "Index out of bounds for map width"
+        );
+        &self.cells[idx]
+    }
+}
+
+impl IndexMut<(usize, usize)> for Map {
+    fn index_mut(&mut self, idx: (usize, usize)) -> &mut Self::Output {
+        debug_assert!(
+            idx.0 < self.cells.shape()[0],
+            "Index out of bounds for map height"
+        );
+        debug_assert!(
+            idx.1 < self.cells.shape()[1],
+            "Index out of bounds for map width"
+        );
+        &mut self.cells[idx]
     }
 }
 
