@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
-for file in ./src/*; do
-  # print the filename
-  echo "File: $file"
+shopt -s globstar
 
-  # open a Rust code fence, cat the file, then close it
+for file in ./src/**/*.rs; do
+  # only process regular files
+  [[ -f "$file" ]] || continue
+
+  echo "File: $file"
   echo '```rust'
   cat "$file"
   echo '```'
-
-  # separator (optional)
   echo
 done

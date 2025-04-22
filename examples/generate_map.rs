@@ -1,8 +1,47 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use photo::ImageRGBA;
 use rand::rng;
-use std::path::PathBuf;
+use std::{num::ParseIntError, path::PathBuf, str::FromStr};
 use wave_function::{Map, Tileset, WaveFunctionWithBacktracking};
+
+/// Only these three algorithms allowed
+#[derive(ValueEnum, Debug, Clone)]
+enum Algorithm {
+    Fast,
+    Basic,
+    Backtracking,
+}
+
+/// Holds “NxM” and parses into two usize fields
+#[derive(Debug, Clone)]
+struct MapSize {
+    width: usize,
+    height: usize,
+}
+
+impl FromStr for MapSize {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let mut parts = s.split('x');
+        let w = parts
+            .next()
+            .ok_or("missing width")?
+            .parse()
+            .map_err(|e: ParseIntError| e.to_string())?;
+        let h = parts
+            .next()
+            .ok_or("missing height")?
+            .parse()
+            .map_err(|e: ParseIntError| e.to_string())?;
+        if parts.next().is_some() {
+            return Err("too many parts".into());
+        }
+        Ok(MapSize {
+            width: w,
+            height: h,
+        })
+    }
+}
 
 /// Image processing configuration.
 #[derive(Parser, Debug)]
@@ -13,6 +52,12 @@ struct Config {
 
     #[arg(short, long)]
     output_filepath: PathBuf,
+
+    #[arg(short, long)]
+    algorithm: Algorithm,
+
+    #[arg(short, long)]
+    map_size: MapSize,
 
     #[arg(short = 's', long)]
     tile_size: usize,
@@ -43,6 +88,11 @@ fn main() {
     if config.verbose {
         println!("Input image       : {}", config.input_tileset.display());
         println!("Output directory  : {}", config.output_filepath.display());
+        println!("Algorithm         : {:?}", config.algorithm);
+        println!(
+            "Map size          : {}x{}",
+            config.map_size.width, config.map_size.height
+        );
         println!("Tile size         : {}", config.tile_size);
         println!("Border size       : {}", config.border_size);
     }
@@ -53,8 +103,7 @@ fn main() {
         print_tileset_images(&tileset);
     }
 
-    let resolution = (150, 150);
-    let template = Map::empty(resolution);
+    let template = Map::empty((config.map_size.width, config.map_size.height));
     // template.set((0, 0), Cell::Fixed(1));
 
     // for i in 10..20 {
