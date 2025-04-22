@@ -1,12 +1,12 @@
 use anyhow::{Result, bail};
 use fixedbitset::FixedBitSet;
 use indicatif::{ProgressBar, ProgressStyle};
-use photo::ALL_DIRECTIONS;
-use photo::Direction;
-use rand::distr::weighted::WeightedIndex;
-use rand::prelude::*;
-use std::collections::{HashSet, VecDeque};
-use std::time::{Duration, Instant};
+use photo::{ALL_DIRECTIONS, Direction};
+use rand::{distr::weighted::WeightedIndex, prelude::*};
+use std::{
+    collections::{HashSet, VecDeque},
+    time::{Duration, Instant},
+};
 
 use crate::{Cell, Map, Rules, WaveFunction};
 
