@@ -6,7 +6,7 @@ use rand::{distr::weighted::WeightedIndex, prelude::*};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use super::common::{calculate_neighbors, initial_propagation, propagate_constraints};
+use super::common::{calculate_neighbours, initial_propagation, propagate_constraints};
 use crate::{Cell, Map, Rules, WaveFunction};
 
 const MAX_ITERATIONS: usize = 1_000_000; // Max iterations for constraint propagation
@@ -47,7 +47,7 @@ impl WaveFunction for WaveFunctionBacktracking {
         }
 
         // Precompute neighbors using common function
-        let neighbors = calculate_neighbors(height, width, &is_ignore);
+        let neighbors = calculate_neighbours(height, width, &is_ignore);
 
         // Initial propagation - full AC-3 using common function
         initial_propagation(

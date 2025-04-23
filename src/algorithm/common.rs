@@ -21,7 +21,7 @@ pub struct Neighbour {
 }
 
 // Efficiently calculate neighborhood information for a grid
-pub fn calculate_neighbors(
+pub fn calculate_neighbours(
     height: usize,
     width: usize,
     is_ignore: &Array2<bool>,
