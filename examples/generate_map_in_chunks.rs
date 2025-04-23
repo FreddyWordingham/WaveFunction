@@ -1,5 +1,6 @@
 use clap::{Parser, ValueEnum};
-use photo::ImageRGBA;
+use ndarray::Array2;
+use photo::{Direction, ImageRGBA};
 use rand::rng;
 use std::{num::ParseIntError, path::PathBuf, str::FromStr};
 use wave_function::{Map, Tileset, WaveFunctionBacktracking, WaveFunctionFast};
@@ -56,7 +57,10 @@ struct Config {
     algorithm: Algorithm,
 
     #[arg(short, long)]
-    map_size: MapSize,
+    chunk_size: MapSize,
+
+    #[arg(short, long)]
+    num_chunks: MapSize,
 
     #[arg(short = 's', long)]
     tile_size: usize,
@@ -89,8 +93,12 @@ fn main() {
         println!("Output directory  : {}", config.output_filepath.display());
         println!("Algorithm         : {:?}", config.algorithm);
         println!(
-            "Map size          : {}x{}",
-            config.map_size.width, config.map_size.height
+            "Chunk size        : {}x{}",
+            config.chunk_size.width, config.chunk_size.height
+        );
+        println!(
+            "Number of chunks       : {}x{}",
+            config.chunk_size.width, config.chunk_size.height
         );
         println!("Tile size         : {}", config.tile_size);
         println!("Border size       : {}", config.border_size);
@@ -104,17 +112,28 @@ fn main() {
 
     let mut rng = rng();
 
-    let template = Map::empty((config.map_size.width, config.map_size.height));
-    let map = match config.algorithm {
-        Algorithm::Fast => template
+    let mut chunks = Array2::from_elem(
+        (config.num_chunks.width, config.num_chunks.height),
+        Map::empty((config.chunk_size.width, config.chunk_size.height)),
+    );
+
+    chunks[(0, 0)] = match config.algorithm {
+        Algorithm::Fast => Map::empty((config.chunk_size.width, config.chunk_size.height))
             .collapse::<WaveFunctionFast>(tileset.rules(), &mut rng)
             .expect("Failed to collapse map"),
-        Algorithm::Backtracking => template
+        Algorithm::Backtracking => Map::empty((config.chunk_size.width, config.chunk_size.height))
             .collapse::<WaveFunctionBacktracking>(tileset.rules(), &mut rng)
             .expect("Failed to collapse map"),
     };
+    println!("{}", chunks[(0, 0)]);
 
-    let img = map.render(&tileset);
-    img.save(&config.output_filepath)
-        .expect("Failed to save image");
+    chunks[(1, 0)] = chunks[(0, 0)].bordering_chunk(Direction::East, config.border_size);
+    println!("{}", chunks[(1, 0)]);
+
+    // let imgs = chunks
+    //     .mapv(|c| c.render(&tileset))
+    //     .map(|img| img.interior(1));
+    // let img = ImageRGBA::from_tiles(&imgs);
+    // img.save(&config.output_filepath)
+    //     .expect("Failed to save image");
 }

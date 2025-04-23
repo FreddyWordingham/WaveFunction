@@ -1,7 +1,7 @@
 use anyhow::Result;
 use fixedbitset::FixedBitSet;
-use ndarray::Array2;
-use photo::ImageRGBA;
+use ndarray::{Array2, s};
+use photo::{Direction, ImageRGBA};
 use rand::Rng;
 use std::{
     fmt::{Display, Formatter},
@@ -26,10 +26,10 @@ impl Map {
         Self { cells }
     }
 
-    pub fn empty(resolution: (usize, usize)) -> Self {
-        debug_assert!(resolution.0 > 0, "Map height must be greater than zero");
-        debug_assert!(resolution.1 > 0, "Map width must be greater than zero");
-        let cells = Array2::from_elem(resolution, Cell::Wildcard);
+    pub fn empty(size: (usize, usize)) -> Self {
+        debug_assert!(size.0 > 0, "Map height must be greater than zero");
+        debug_assert!(size.1 > 0, "Map width must be greater than zero");
+        let cells = Array2::from_elem(size, Cell::Wildcard);
         Self { cells }
     }
 
@@ -81,6 +81,14 @@ impl Map {
             .max()
     }
 
+    pub fn height(&self) -> usize {
+        self.cells.shape()[0]
+    }
+
+    pub fn width(&self) -> usize {
+        self.cells.shape()[1]
+    }
+
     pub fn size(&self) -> (usize, usize) {
         self.cells.dim()
     }
@@ -99,6 +107,105 @@ impl Map {
 
     pub fn collapse<WF: WaveFunction>(&self, rules: &Rules, rng: &mut impl Rng) -> Result<Self> {
         WF::collapse(self, rules, rng)
+    }
+
+    /// Create a bordering map chunk with the same dimensions as the original map.
+    /// The new chunk will contain the border of the original map in the specified direction and size.
+    pub fn bordering_chunk(&self, direction: Direction, border_size: usize) -> Self {
+        assert!(border_size > 0, "Border size must be greater than zero");
+        let (height, width) = self.size();
+        let mut chunk = Self::empty((height, width));
+        match direction {
+            Direction::North => {
+                assert!(
+                    border_size < height,
+                    "Border size must be less than map height"
+                );
+                chunk
+                    .cells
+                    .slice_mut(s![(height - border_size).., ..])
+                    .assign(&self.cells.slice(s![0..border_size, ..]));
+            }
+            Direction::East => {
+                assert!(
+                    border_size < width,
+                    "Border size must be less than map width"
+                );
+                chunk
+                    .cells
+                    .slice_mut(s![.., 0..border_size])
+                    .assign(&self.cells.slice(s![.., (width - border_size)..]));
+            }
+            Direction::South => {
+                assert!(
+                    border_size < height,
+                    "Border size must be less than map height"
+                );
+                chunk
+                    .cells
+                    .slice_mut(s![0..border_size, ..])
+                    .assign(&self.cells.slice(s![(height - border_size).., ..]));
+            }
+            Direction::West => {
+                assert!(
+                    border_size < width,
+                    "Border size must be less than map width"
+                );
+                chunk
+                    .cells
+                    .slice_mut(s![.., (width - border_size)..])
+                    .assign(&self.cells.slice(s![.., 0..border_size]));
+            }
+        }
+        chunk
+    }
+
+    /// Set the border of the current map to match the border of another map in the specified direction.
+    pub fn set_shared_border(&mut self, other: &Self, direction: Direction, border_size: usize) {
+        assert!(border_size > 0, "Border size must be greater than zero");
+        let (height, width) = self.size();
+        match direction {
+            Direction::North => {
+                assert!(
+                    border_size < height,
+                    "Border size must be less than map height"
+                );
+                assert!(width == other.width(), "Maps must have the same width");
+                self.cells
+                    .slice_mut(s![0..border_size, ..])
+                    .assign(&other.cells.slice(s![height - border_size.., ..]));
+            }
+            Direction::East => {
+                assert!(
+                    border_size < width,
+                    "Border size must be less than map width"
+                );
+                assert!(height == other.height(), "Maps must have the same height");
+                self.cells
+                    .slice_mut(s![.., (width - border_size)..])
+                    .assign(&other.cells.slice(s![.., 0..border_size]));
+            }
+            Direction::South => {
+                assert!(
+                    border_size < height,
+                    "Border size must be less than map height"
+                );
+                assert!(width == other.width(), "Maps must have the same width");
+                self.cells
+                    .slice_mut(s![(height - border_size).., ..])
+                    .assign(&other.cells.slice(s![0..border_size, ..]));
+            }
+            Direction::West => {
+                assert!(
+                    border_size < width,
+                    "Border size must be less than map width"
+                );
+                assert!(height == other.height(), "Maps must have the same height");
+                self.cells
+                    .slice_mut(s![.., 0..border_size])
+                    .assign(&other.cells.slice(s![.., (width - border_size)..]));
+            }
+        }
     }
 
     pub fn render(&self, tileset: &Tileset) -> ImageRGBA<u8> {
