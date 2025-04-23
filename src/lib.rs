@@ -21,7 +21,7 @@ mod tileset;
 mod tileset_builder;
 mod wave_function;
 
-pub use algorithm::{WaveFunctionBasic, WaveFunctionOptimised, WaveFunctionWithBacktracking};
+pub use algorithm::*;
 pub use cell::Cell;
 pub use map::Map;
 pub use rules::Rules;

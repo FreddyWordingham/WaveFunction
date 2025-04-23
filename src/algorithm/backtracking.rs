@@ -1,521 +1,463 @@
 use anyhow::{Result, bail};
 use fixedbitset::FixedBitSet;
 use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::Array2;
 use photo::{ALL_DIRECTIONS, Direction};
 use rand::{distr::weighted::WeightedIndex, prelude::*};
-use std::{
-    collections::{HashSet, VecDeque},
-    time::{Duration, Instant},
-};
+use std::collections::{HashSet, VecDeque};
+use std::time::{Duration, Instant};
 
 use crate::{Cell, Map, Rules, WaveFunction};
 
-// Mapping from Direction to coordinate delta
-fn delta_from_direction(dir: Direction) -> (isize, isize) {
-    match dir {
-        Direction::North => (-1, 0),
-        Direction::East => (0, 1),
-        Direction::South => (1, 0),
-        Direction::West => (0, -1),
-    }
-}
+const MAX_ITERATIONS: usize = 1_000_000; // Max iterations for constraint propagation
+const MAX_BACKTRACK_ATTEMPTS: usize = 100; // Max number of backtracking attempts
+const MAX_BACKTRACK_DEPTH: usize = 50; // Max depth for backtracking stack
 
-// Precomputed neighbour data structure
-#[derive(Clone)]
+// Precomputed direction deltas for faster access
+const DIRECTION_DELTAS: [(isize, isize); 4] = [
+    (1, 0),  // North
+    (0, 1),  // East
+    (-1, 0), // South
+    (0, -1), // West
+];
+
+// Precomputed neighbour data structure that works with 2D coordinates
+#[derive(Clone, Debug)]
 struct Neighbour {
-    idx: usize,
+    pos: (usize, usize),
     dir: Direction,
     opp_dir: Direction,
 }
 
-// Structure to represent a decision point for backtracking
+// Structure to store state for backtracking
 #[derive(Clone)]
-struct DecisionPoint {
-    // Cell index where the decision was made
-    cell_idx: usize,
-    // The option chosen at this decision point
-    choice: usize,
-    // Options that have been tried and failed at this point
-    tried_options: HashSet<usize>,
-    // Complete state snapshot for backtracking
-    domains: Vec<FixedBitSet>,
-    counts: Vec<usize>,
-    bucket_sets: Vec<HashSet<usize>>,
+struct BacktrackState {
+    domains: Array2<FixedBitSet>,
+    domain_sizes: Array2<usize>,
+    cell: (usize, usize),
+    tried_values: HashSet<usize>,
+    collapsed_cells: HashSet<(usize, usize)>,
 }
 
-pub struct WaveFunctionWithBacktracking;
+pub struct WaveFunctionBacktracking;
 
-impl WaveFunction for WaveFunctionWithBacktracking {
-    /// Collapses a map using the optimized Wave Function Collapse algorithm with backtracking
+impl WaveFunction for WaveFunctionBacktracking {
+    /// Collapses a map using a backtracking-capable Wave Function Collapse algorithm
     /// Returns a new map with all wildcards collapsed to fixed values.
     fn collapse(map: &Map, rules: &Rules, rng: &mut impl Rng) -> Result<Map> {
         let (height, width) = map.size();
         let num_tiles = rules.len();
-        let size = height * width;
 
-        // Flattened domains; ignore cells get an empty bitset but are skipped below
-        let mut domains: Vec<FixedBitSet> = Vec::with_capacity(size);
-        let mut is_ignore = vec![false; size];
+        // Use Array2 for domains and mask
+        let mut domains = map.domains(num_tiles);
+        let is_ignore = map.mask();
 
-        // Cached counts for faster entropy calculations
-        let mut counts = vec![0; size];
-
-        // Initialize domains and counts
-        for idx in 0..size {
-            let r = idx / width;
-            let c = idx % width;
-            match map[(r, c)] {
-                Cell::Ignore => {
-                    let bs = FixedBitSet::with_capacity(num_tiles);
-                    domains.push(bs);
-                    is_ignore[idx] = true;
-                    counts[idx] = 0;
-                }
-                Cell::Wildcard => {
-                    let mut bs = FixedBitSet::with_capacity(num_tiles);
-                    bs.insert_range(..num_tiles);
-                    domains.push(bs);
-                    counts[idx] = num_tiles;
-                }
-                Cell::Fixed(i) => {
-                    let mut bs = FixedBitSet::with_capacity(num_tiles);
-                    bs.insert(i);
-                    domains.push(bs);
-                    counts[idx] = 1;
+        // Pre-compute and cache domain sizes
+        let mut domain_sizes = Array2::from_elem((height, width), 0);
+        for y in 0..height {
+            for x in 0..width {
+                if !is_ignore[(y, x)] {
+                    let count = domains[(y, x)].count_ones(..);
+                    domain_sizes[(y, x)] = count;
                 }
             }
         }
 
-        // Precompute neighbours for faster access
-        let mut neighbours: Vec<Vec<Neighbour>> = Vec::with_capacity(size);
-        for idx in 0..size {
-            let r = idx / width;
-            let c = idx % width;
-            let mut cell_neighbours = Vec::new();
+        // Precompute neighbors for each cell for faster access
+        let mut neighbors: Array2<Vec<Neighbour>> = Array2::from_elem((height, width), Vec::new());
+        for y in 0..height {
+            for x in 0..width {
+                if is_ignore[(y, x)] {
+                    continue;
+                }
 
-            for dir in ALL_DIRECTIONS.iter() {
-                let (dr, dc) = delta_from_direction(*dir);
-                let nr = r.wrapping_add(dr as usize);
-                let nc = c.wrapping_add(dc as usize);
-                if nr < height && nc < width {
-                    let neighbour_idx = nr * width + nc;
-                    if !is_ignore[neighbour_idx] {
-                        let opp_dir = dir.opposite();
-                        cell_neighbours.push(Neighbour {
-                            idx: neighbour_idx,
+                for (i, dir) in ALL_DIRECTIONS.iter().enumerate() {
+                    let (dy, dx) = DIRECTION_DELTAS[i];
+                    let ny = y.wrapping_add(dy as usize);
+                    let nx = x.wrapping_add(dx as usize);
+
+                    if ny < height && nx < width && !is_ignore[(ny, nx)] {
+                        neighbors[(y, x)].push(Neighbour {
+                            pos: (ny, nx),
                             dir: *dir,
-                            opp_dir,
+                            opp_dir: dir.opposite(),
                         });
                     }
                 }
             }
-
-            neighbours.push(cell_neighbours);
         }
 
-        // Helper: run AC³ on the current domains, using an efficient queue
-        let mut queue = VecDeque::new();
-
-        // Initial queue population with all constraints
-        for xi in 0..size {
-            if is_ignore[xi] {
-                continue;
-            }
-
-            for neighbour in &neighbours[xi] {
-                queue.push_back((xi, neighbour.idx, neighbour.dir));
-            }
-        }
-
-        // Verify and sync domain counts
-        fn verify_counts(domains: &[FixedBitSet], counts: &mut [usize]) -> bool {
-            let mut changed = false;
-            for (i, domain) in domains.iter().enumerate() {
-                let actual = domain.count_ones(..);
-                if counts[i] != actual {
-                    counts[i] = actual;
-                    changed = true;
-                }
-            }
-            changed
-        }
-
-        // Revise function that updates counts directly
+        // Function to revise constraints
         fn revise(
-            domains: &mut [FixedBitSet],
-            counts: &mut [usize],
+            domains: &mut Array2<FixedBitSet>,
+            domain_sizes: &mut Array2<usize>,
             rules: &Rules,
-            xi: usize,
-            xj: usize,
+            xi: (usize, usize),
+            xj: (usize, usize),
             dir: Direction,
         ) -> bool {
-            let d_idx = dir.index::<usize>();
-            let mut changed = false;
-            let current_domain = domains[xi].clone(); // Take a snapshot to iterate over
+            let mut modified = false;
+            let dir_index = dir.index::<usize>();
 
-            for u in current_domain.ones() {
-                let mut ok = false;
+            // Early exit if domain is already a singleton
+            if domain_sizes[xi] <= 1 {
+                return false;
+            }
+
+            // Fast path: if we have only one option in xj, directly filter xi
+            if domain_sizes[xj] == 1 {
+                let v = domains[xj].ones().next().unwrap();
+                let mut to_remove = Vec::new();
+
+                for u in domains[xi].ones() {
+                    if !rules.masks()[u][dir_index].contains(v) {
+                        to_remove.push(u);
+                    }
+                }
+
+                if !to_remove.is_empty() {
+                    let remove_count = to_remove.len();
+                    for &u in &to_remove {
+                        domains[xi].remove(u);
+                    }
+                    domain_sizes[xi] -= remove_count;
+                    modified = true;
+                }
+
+                return modified;
+            }
+
+            // Standard case: check each value in xi domain
+            let mut to_remove = Vec::new();
+            for u in domains[xi].ones() {
+                let mask = &rules.masks()[u][dir_index];
+                let mut has_support = false;
+
                 for v in domains[xj].ones() {
-                    if rules.masks()[u][d_idx].contains(v) {
-                        ok = true;
+                    if mask.contains(v) {
+                        has_support = true;
                         break;
                     }
                 }
-                if !ok {
-                    domains[xi].remove(u);
-                    counts[xi] -= 1;
-                    changed = true;
+
+                if !has_support {
+                    to_remove.push(u);
                 }
             }
 
-            changed
+            if !to_remove.is_empty() {
+                let remove_count = to_remove.len();
+                for &u in &to_remove {
+                    domains[xi].remove(u);
+                }
+                domain_sizes[xi] -= remove_count;
+                modified = true;
+            }
+
+            modified
+        }
+
+        // Function to propagate constraints
+        fn propagate_constraints(
+            domains: &mut Array2<FixedBitSet>,
+            domain_sizes: &mut Array2<usize>,
+            rules: &Rules,
+            neighbors: &Array2<Vec<Neighbour>>,
+            start_cell: (usize, usize),
+        ) -> Result<HashSet<(usize, usize)>> {
+            let mut queue = VecDeque::new();
+            let mut affected_cells = HashSet::new();
+
+            // Initialize queue with starting cell's neighbors
+            for neighbor in &neighbors[start_cell] {
+                queue.push_back((neighbor.pos, start_cell, neighbor.opp_dir));
+            }
+
+            let mut iteration_count = 0;
+            while let Some((xi, xj, dir)) = queue.pop_front() {
+                iteration_count += 1;
+                if iteration_count > MAX_ITERATIONS {
+                    bail!("Too many constraint propagation iterations");
+                }
+
+                if revise(domains, domain_sizes, rules, xi, xj, dir) {
+                    if domain_sizes[xi] == 0 {
+                        bail!("No valid tiles remain at cell ({}, {})", xi.0, xi.1);
+                    }
+
+                    // Track that this cell was affected
+                    affected_cells.insert(xi);
+
+                    // Add all affected neighbors to queue except xj
+                    for neighbor in &neighbors[xi] {
+                        if neighbor.pos != xj {
+                            queue.push_back((neighbor.pos, xi, neighbor.opp_dir));
+                        }
+                    }
+                }
+            }
+
+            Ok(affected_cells)
+        }
+
+        // Set up initial constraint propagation queue
+        let mut queue = VecDeque::with_capacity(4 * width * height);
+
+        // Initial queue population with all constraints
+        for y in 0..height {
+            for x in 0..width {
+                if is_ignore[(y, x)] {
+                    continue;
+                }
+
+                for neighbor in &neighbors[(y, x)] {
+                    queue.push_back(((y, x), neighbor.pos, neighbor.dir));
+                }
+            }
         }
 
         // Initial propagation - full AC-3
         let mut iteration_count = 0;
-        const MAX_ITERATIONS: usize = 1_000_000; // Prevent infinite loops
-        const MAX_BACKTRACK_ATTEMPTS: usize = 1000; // Limit backtracking attempts
-        const MAX_RUNTIME_SECONDS: u64 = 300; // Time limit in seconds (5 minutes)
-
-        let start_time = Instant::now();
-        let mut backtrack_attempts = 0;
-
-        // Initial propagation
         while let Some((xi, xj, dir)) = queue.pop_front() {
             iteration_count += 1;
             if iteration_count > MAX_ITERATIONS {
-                bail!("Too many constraint propagation iterations - possible infinite loop");
+                bail!("Too many initial constraint propagation iterations");
             }
 
-            if revise(&mut domains, &mut counts, rules, xi, xj, dir) {
-                if counts[xi] == 0 {
-                    // Initial constraints are unsatisfiable - no backtracking can help here
+            if revise(&mut domains, &mut domain_sizes, rules, xi, xj, dir) {
+                if domain_sizes[xi] == 0 {
                     bail!(
-                        "Initial constraints are unsatisfiable at cell ({}, {})",
-                        xi / width,
-                        xi % width
+                        "No valid tiles remain at cell ({}, {}) during initial propagation",
+                        xi.0,
+                        xi.1
                     );
                 }
 
-                // Add all affected neighbours to queue except xj
-                for neighbour in &neighbours[xi] {
-                    if neighbour.idx != xj {
-                        queue.push_back((neighbour.idx, xi, neighbour.opp_dir));
+                // Add all affected neighbors to queue except xj
+                for neighbor in &neighbors[xi] {
+                    if neighbor.pos != xj {
+                        queue.push_back((neighbor.pos, xi, neighbor.opp_dir));
                     }
                 }
             }
         }
 
-        // Verify counts match domains after initial propagation
-        verify_counts(&domains, &mut counts);
-
-        // Count cells to collapse for progress bar - this counts only non-ignore cells with domains > 1
+        // Count cells to collapse for progress bar
         let mut cells_to_collapse = 0;
-        for i in 0..size {
-            if !is_ignore[i] && counts[i] > 1 {
-                cells_to_collapse += 1;
+        for y in 0..height {
+            for x in 0..width {
+                if !is_ignore[(y, x)] && domain_sizes[(y, x)] > 1 {
+                    cells_to_collapse += 1;
+                }
             }
         }
 
         let pb = ProgressBar::new(cells_to_collapse as u64);
         pb.set_style(
             ProgressStyle::with_template(
-                "{bar:40.cyan/blue} {pos}/{len} cells [{elapsed_precise}]",
+                "{spinner:.green} [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} cells (Backtracked: {msg})"
             )
             .unwrap()
             .progress_chars("##-"),
         );
+        pb.set_message("0");
 
-        // More robust bucket management using HashSet to track cells in each bucket
-        let mut bucket_sets: Vec<HashSet<usize>> = vec![HashSet::new(); num_tiles + 1];
+        // More robust bucket management using HashSet to track cells by entropy
+        let mut bucket_sets: Vec<HashSet<(usize, usize)>> = vec![HashSet::new(); num_tiles + 1];
 
         // Initial population of entropy buckets
-        for i in 0..size {
-            if !is_ignore[i] && counts[i] > 1 {
-                bucket_sets[counts[i]].insert(i);
+        for y in 0..height {
+            for x in 0..width {
+                if !is_ignore[(y, x)] && domain_sizes[(y, x)] > 1 {
+                    bucket_sets[domain_sizes[(y, x)]].insert((y, x));
+                }
             }
         }
 
-        // Stack for backtracking
-        let mut decision_stack: Vec<DecisionPoint> = Vec::new();
+        // Backtracking stack
+        let mut backtrack_stack: Vec<BacktrackState> = Vec::with_capacity(MAX_BACKTRACK_DEPTH);
+        let mut backtrack_count = 0;
+        let mut collapsed_cells = HashSet::new();
+        let start_time = Instant::now();
 
-        // Main collapse loop with bucketed entropy selection and backtracking
-        'outer: loop {
-            // Check if we're done - no more cells to collapse
-            if (2..=num_tiles).all(|e| bucket_sets[e].is_empty()) {
-                break 'outer; // All cells collapsed successfully
-            }
-
-            // Check time constraints
-            if start_time.elapsed() > Duration::from_secs(MAX_RUNTIME_SECONDS) {
-                bail!("Time limit exceeded ({} seconds)", MAX_RUNTIME_SECONDS);
-            }
-
-            // Find the lowest entropy cell
-            let entropy = match (2..=num_tiles).find(|&e| !bucket_sets[e].is_empty()) {
-                Some(e) => e,
-                None => {
-                    // No cells with multiple options - we're either done or something went wrong
-                    if decision_stack.is_empty() {
-                        break 'outer; // All cells collapsed successfully
-                    } else {
-                        // This shouldn't happen in normal operation
-                        bail!("No cells with multiple options, but still have decision points");
-                    }
-                }
-            };
-
+        // Main collapse loop with backtracking
+        'outer: while let Some(entropy) = (2..=num_tiles).find(|&e| !bucket_sets[e].is_empty()) {
             // Extract a cell from the current entropy bucket
             let best_idx = *bucket_sets[entropy].iter().next().unwrap();
             bucket_sets[entropy].remove(&best_idx);
 
-            // Safety check - verify count matches domain
-            let actual_count = domains[best_idx].count_ones(..);
-            if actual_count != counts[best_idx] {
-                counts[best_idx] = actual_count;
-                if actual_count != entropy {
-                    // Our bucket assignment was wrong, put it in the right bucket
-                    if counts[best_idx] > 1 {
-                        bucket_sets[counts[best_idx]].insert(best_idx);
-                    }
-                    continue 'outer;
-                }
-            }
-
-            // Get all options for this cell
+            // Get available options for this cell
             let options: Vec<usize> = domains[best_idx].ones().collect();
             if options.is_empty() {
-                // This shouldn't happen due to earlier checks, but just in case
-                bail!(
-                    "No options remain for cell at {}, but count was {}",
-                    best_idx,
-                    counts[best_idx]
-                );
+                // This shouldn't happen normally, but handle it just in case
+                if backtrack_stack.is_empty() {
+                    bail!(
+                        "No options remain for cell at ({}, {}), but backtrack stack is empty",
+                        best_idx.0,
+                        best_idx.1
+                    );
+                }
+
+                continue; // Skip this cell and try the next one
             }
 
-            // Sample weighted by frequency
+            // Calculate weights for weighted random selection
             let weights: Vec<usize> = options.iter().map(|&t| rules.frequencies()[t]).collect();
-            let dist = WeightedIndex::new(&weights).unwrap();
-            let choice = options[dist.sample(rng)];
 
-            // Save current state before making a decision
-            let decision_point = DecisionPoint {
-                cell_idx: best_idx,
-                choice,
-                tried_options: HashSet::from([choice]),
+            // Save state for backtracking
+            let backtrack_state = BacktrackState {
                 domains: domains.clone(),
-                counts: counts.clone(),
-                bucket_sets: bucket_sets.clone(),
+                domain_sizes: domain_sizes.clone(),
+                cell: best_idx,
+                tried_values: HashSet::new(),
+                collapsed_cells: collapsed_cells.clone(),
             };
 
-            decision_stack.push(decision_point);
+            // If backtrack stack is too large, remove oldest entries
+            while backtrack_stack.len() >= MAX_BACKTRACK_DEPTH {
+                backtrack_stack.remove(0);
+            }
 
-            // Make the choice
+            // Push current state to backtrack stack
+            backtrack_stack.push(backtrack_state);
+
+            // Choose a tile using weighted distribution
+            let choice = if weights.iter().any(|&w| w == 0) {
+                // Handle zero weights case - use uniform distribution
+                options[rng.random_range(0..options.len())]
+            } else {
+                // Use weighted distribution
+                let dist = WeightedIndex::new(&weights).unwrap();
+                options[dist.sample(rng)]
+            };
+
+            // Fix the chosen cell
             domains[best_idx].clear();
             domains[best_idx].insert(choice);
-            counts[best_idx] = 1;
+            domain_sizes[best_idx] = 1;
+            collapsed_cells.insert(best_idx);
 
             pb.inc(1);
 
-            let mut inconsistency_found = false;
+            // Propagate constraints
+            let propagation_result =
+                propagate_constraints(&mut domains, &mut domain_sizes, rules, &neighbors, best_idx);
 
-            // Propagate from this collapse - full AC-3
-            queue.clear();
-            for neighbour in &neighbours[best_idx] {
-                queue.push_back((neighbour.idx, best_idx, neighbour.opp_dir));
-            }
+            match propagation_result {
+                Ok(affected_cells) => {
+                    // Update buckets for all affected cells
+                    for &cell_idx in &affected_cells {
+                        // Remove from old bucket
+                        for e in 2..=num_tiles {
+                            bucket_sets[e].remove(&cell_idx);
+                        }
 
-            // Track which cells are affected by constraint propagation to update buckets
-            let mut affected_cells = HashSet::new();
-
-            iteration_count = 0;
-            while let Some((xi, xj, dir)) = queue.pop_front() {
-                iteration_count += 1;
-                if iteration_count > MAX_ITERATIONS {
-                    bail!(
-                        "Too many constraint propagation iterations after collapse - possible infinite loop"
-                    );
-                }
-
-                if revise(&mut domains, &mut counts, rules, xi, xj, dir) {
-                    if counts[xi] == 0 {
-                        // Inconsistency detected - need to backtrack
-                        inconsistency_found = true;
-                        break;
-                    }
-
-                    // Track that this cell was affected
-                    affected_cells.insert(xi);
-
-                    // Add all affected neighbours to queue except xj
-                    for neighbour in &neighbours[xi] {
-                        if neighbour.idx != xj {
-                            queue.push_back((neighbour.idx, xi, neighbour.opp_dir));
+                        // Add to new bucket if still has multiple options
+                        if domain_sizes[cell_idx] > 1 {
+                            bucket_sets[domain_sizes[cell_idx]].insert(cell_idx);
                         }
                     }
                 }
-            }
+                Err(_) => {
+                    // Constraint propagation failed
+                    backtrack_count += 1;
+                    pb.set_message(backtrack_count.to_string());
 
-            if inconsistency_found {
-                // Need to backtrack
-                backtrack_attempts += 1;
-
-                if backtrack_attempts > MAX_BACKTRACK_ATTEMPTS {
-                    bail!(
-                        "Maximum backtrack attempts ({}) exceeded",
-                        MAX_BACKTRACK_ATTEMPTS
-                    );
-                }
-
-                // Backtracking loop
-                'backtrack: loop {
-                    if decision_stack.is_empty() {
-                        bail!("Backtracking exhausted all possibilities - no solution exists");
+                    if backtrack_count > MAX_BACKTRACK_ATTEMPTS {
+                        bail!("Maximum backtracking attempts exceeded");
                     }
 
-                    // Get the last decision point
-                    let mut last_decision = decision_stack.pop().unwrap();
+                    // Pop the last state from the stack
+                    if let Some(mut state) = backtrack_stack.pop() {
+                        // Mark the choice we just tried as invalid
+                        state.tried_values.insert(choice);
 
-                    // Find untried options at this decision point
-                    let all_options: Vec<usize> = last_decision.domains[last_decision.cell_idx]
-                        .ones()
-                        .collect();
+                        // Restore domains and other state
+                        domains = state.domains.clone();
+                        domain_sizes = state.domain_sizes.clone();
+                        collapsed_cells = state.collapsed_cells.clone();
 
-                    let untried_options: Vec<usize> = all_options
-                        .into_iter()
-                        .filter(|&opt| !last_decision.tried_options.contains(&opt))
-                        .collect();
+                        // Get remaining options that haven't been tried yet
+                        let remaining_options: Vec<usize> = domains[state.cell]
+                            .ones()
+                            .filter(|&opt| !state.tried_values.contains(&opt))
+                            .collect();
 
-                    if untried_options.is_empty() {
-                        // All options tried at this level, backtrack further
-                        continue 'backtrack;
-                    }
-
-                    // Pick a new option
-                    // We could use weighted selection here too
-                    let new_choice = untried_options[rng.random_range(0..untried_options.len())];
-
-                    // Add this option to tried options
-                    last_decision.tried_options.insert(new_choice);
-
-                    // Restore state from this decision point
-                    domains = last_decision.domains.clone();
-                    counts = last_decision.counts.clone();
-                    bucket_sets = last_decision.bucket_sets.clone();
-
-                    // Apply the new choice
-                    domains[last_decision.cell_idx].clear();
-                    domains[last_decision.cell_idx].insert(new_choice);
-                    counts[last_decision.cell_idx] = 1;
-
-                    // Update decision with the new choice
-                    last_decision.choice = new_choice;
-
-                    // Store the cell_idx before we move last_decision
-                    let cell_idx = last_decision.cell_idx;
-
-                    // Push updated decision back to stack
-                    decision_stack.push(last_decision);
-
-                    // Propagate from this new choice
-                    queue.clear();
-                    for neighbour in &neighbours[cell_idx] {
-                        queue.push_back((neighbour.idx, cell_idx, neighbour.opp_dir));
-                    }
-
-                    // Check if this new choice leads to inconsistency
-                    inconsistency_found = false;
-                    affected_cells.clear();
-
-                    iteration_count = 0;
-                    while let Some((xi, xj, dir)) = queue.pop_front() {
-                        iteration_count += 1;
-                        if iteration_count > MAX_ITERATIONS {
-                            bail!("Too many iterations during backtracking");
+                        if remaining_options.is_empty() {
+                            // No options left for this cell, need to backtrack further
+                            continue 'outer;
                         }
 
-                        if revise(&mut domains, &mut counts, rules, xi, xj, dir) {
-                            if counts[xi] == 0 {
-                                // Still inconsistent with new choice
-                                inconsistency_found = true;
-                                break;
-                            }
+                        // Choose a different option
+                        let weights: Vec<usize> = remaining_options
+                            .iter()
+                            .map(|&t| rules.frequencies()[t])
+                            .collect();
 
-                            affected_cells.insert(xi);
+                        let choice = if weights.iter().any(|&w| w == 0) {
+                            // Use uniform distribution
+                            remaining_options[rng.random_range(0..remaining_options.len())]
+                        } else {
+                            // Use weighted distribution
+                            let dist = WeightedIndex::new(&weights).unwrap();
+                            remaining_options[dist.sample(rng)]
+                        };
 
-                            for neighbour in &neighbours[xi] {
-                                if neighbour.idx != xj {
-                                    queue.push_back((neighbour.idx, xi, neighbour.opp_dir));
+                        // Update the cell with new choice
+                        domains[state.cell].clear();
+                        domains[state.cell].insert(choice);
+                        domain_sizes[state.cell] = 1;
+                        collapsed_cells.insert(state.cell);
+
+                        // Update state and push back to stack with the new tried value
+                        state.tried_values.insert(choice);
+                        backtrack_stack.push(state);
+
+                        // Recalculate all buckets after backtracking
+                        bucket_sets = vec![HashSet::new(); num_tiles + 1];
+                        for y in 0..height {
+                            for x in 0..width {
+                                if !is_ignore[(y, x)] && domain_sizes[(y, x)] > 1 {
+                                    bucket_sets[domain_sizes[(y, x)]].insert((y, x));
                                 }
                             }
                         }
                     }
-
-                    if !inconsistency_found {
-                        // This choice works - update buckets and continue
-                        for &cell_idx in &affected_cells {
-                            // Remove from old bucket if we were tracking it
-                            for e in 2..=num_tiles {
-                                bucket_sets[e].remove(&cell_idx);
-                            }
-
-                            // Add to new bucket if still has multiple options
-                            if counts[cell_idx] > 1 {
-                                bucket_sets[counts[cell_idx]].insert(cell_idx);
-                            }
-                        }
-
-                        break 'backtrack; // Exit backtracking loop and continue main loop
-                    }
-                    // If still inconsistent, loop will continue to try another option
                 }
-
-                // After successful backtrack, continue main loop
-                continue 'outer;
             }
 
-            // No inconsistency - update buckets for all affected cells
-            for &cell_idx in &affected_cells {
-                // Remove from old bucket if we were tracking it
-                for e in 2..=num_tiles {
-                    bucket_sets[e].remove(&cell_idx);
-                }
-
-                // Add to new bucket if still has multiple options
-                if counts[cell_idx] > 1 {
-                    bucket_sets[counts[cell_idx]].insert(cell_idx);
-                }
+            // Periodically report progress and check timeout
+            if start_time.elapsed() > Duration::from_secs(10) && backtrack_count > 0 {
+                pb.println(format!(
+                    "Progress: {}/{} cells, {} backtracks so far",
+                    collapsed_cells.len(),
+                    cells_to_collapse,
+                    backtrack_count
+                ));
             }
         }
 
         pb.finish_and_clear();
 
-        // Final count verification before building result
-        verify_counts(&domains, &mut counts);
+        // If we had to backtrack, report the final count
+        if backtrack_count > 0 {
+            println!("Completed with {} backtracking attempts", backtrack_count);
+        }
 
         // Build the final map
         let mut result = map.clone();
-        for idx in 0..size {
-            if !is_ignore[idx] {
-                let bits = domains[idx].ones().collect::<Vec<_>>();
-                if bits.is_empty() {
-                    bail!(
-                        "No possibilities for cell at ({}, {})",
-                        idx / width,
-                        idx % width
-                    );
+        for y in 0..height {
+            for x in 0..width {
+                if !is_ignore[(y, x)] {
+                    let mut bits = domains[(y, x)].ones();
+                    let tile = match bits.next() {
+                        Some(t) => t,
+                        None => bail!("No possibilities for cell at ({}, {})", y, x),
+                    };
+                    result[(y, x)] = Cell::Fixed(tile);
                 }
-                let tile = bits[0]; // Get the first (and should be only) value
-                let r = idx / width;
-                let c = idx % width;
-                result[(r, c)] = Cell::Fixed(tile);
             }
         }
-
-        println!(
-            "Solution found with {} backtrack attempts",
-            backtrack_attempts
-        );
 
         Ok(result)
     }

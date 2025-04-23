@@ -1,7 +1,5 @@
 mod backtracking;
-mod basic;
-mod optimised;
+mod fast;
 
-pub use backtracking::WaveFunctionWithBacktracking;
-pub use basic::WaveFunctionBasic;
-pub use optimised::WaveFunctionOptimised;
+pub use backtracking::WaveFunctionBacktracking;
+pub use fast::WaveFunctionFast;

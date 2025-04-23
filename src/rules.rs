@@ -10,6 +10,10 @@ pub struct Rules {
 
 impl Rules {
     pub fn new(adjacency_matrix: Array3<bool>, frequencies: Vec<usize>) -> Self {
+        assert!(
+            frequencies.iter().all(|&f| f > 0),
+            "Frequencies must be positive"
+        );
         let num_tiles = frequencies.len();
         assert!(
             num_tiles > 0,

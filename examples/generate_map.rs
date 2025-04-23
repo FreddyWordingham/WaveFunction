@@ -2,13 +2,12 @@ use clap::{Parser, ValueEnum};
 use photo::ImageRGBA;
 use rand::rng;
 use std::{num::ParseIntError, path::PathBuf, str::FromStr};
-use wave_function::{Map, Tileset, WaveFunctionWithBacktracking};
+use wave_function::{Map, Tileset, WaveFunctionBacktracking, WaveFunctionFast};
 
 /// Only these three algorithms allowed
 #[derive(ValueEnum, Debug, Clone)]
 enum Algorithm {
     Fast,
-    Basic,
     Backtracking,
 }
 
@@ -114,11 +113,16 @@ fn main() {
 
     let mut rng = rng();
 
-    let collapsed_map = template
-        .collapse::<WaveFunctionWithBacktracking>(tileset.rules(), &mut rng)
-        .expect("Failed to collapse map");
+    let map = match config.algorithm {
+        Algorithm::Fast => template
+            .collapse::<WaveFunctionFast>(tileset.rules(), &mut rng)
+            .expect("Failed to collapse map"),
+        Algorithm::Backtracking => template
+            .collapse::<WaveFunctionBacktracking>(tileset.rules(), &mut rng)
+            .expect("Failed to collapse map"),
+    };
 
-    let img = collapsed_map.render(&tileset);
+    let img = map.render(&tileset);
     img.save(&config.output_filepath)
         .expect("Failed to save image");
 }

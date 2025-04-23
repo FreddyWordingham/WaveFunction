@@ -85,9 +85,9 @@ impl Map {
 
     pub fn mask(&self) -> Array2<bool> {
         self.cells.mapv(|cell| match cell {
-            Cell::Ignore => false,
-            Cell::Wildcard => true,
-            Cell::Fixed(_) => true,
+            Cell::Ignore => true,
+            Cell::Wildcard => false,
+            Cell::Fixed(_) => false,
         })
     }
 
@@ -114,16 +114,7 @@ impl Map {
             Cell::Wildcard => wildcard_img.clone(),
         });
 
-        // TODO: This is a temporary fix for the image rendering issue - we should not need to reverse the image horizontally
-        let mut r_data = data.clone();
-        let (height, width) = self.size();
-        for i in 0..height {
-            for j in 0..width {
-                r_data[[width - i - 1, j]] = data[[i, j]].clone();
-            }
-        }
-
-        ImageRGBA::from_tiles(&r_data)
+        ImageRGBA::from_tiles(&data)
     }
 }
 
