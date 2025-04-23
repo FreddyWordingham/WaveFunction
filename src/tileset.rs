@@ -73,7 +73,7 @@ impl Tileset {
                 adjacency_matrix[(n, i, 0)] = parts[2 + i] == ADJACENCY_VALID_SYMBOL;
             }
             for i in 0..num_tiles {
-                adjacency_matrix[(n, i, 1)] = parts[2 + num_tiles + i] == ADJACENCY_VALID_SYMBOL;
+                adjacency_matrix[(i, n, 1)] = parts[2 + num_tiles + i] == ADJACENCY_VALID_SYMBOL;
             }
         }
 

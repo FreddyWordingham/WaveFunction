@@ -4,13 +4,7 @@ use ndarray::Array2;
 use photo::{ALL_DIRECTIONS, Direction};
 use std::collections::{HashSet, VecDeque};
 
-// Precomputed direction deltas for faster access (using the North=(-1,0) convention)
-pub const DIRECTION_DELTAS: [(isize, isize); 4] = [
-    (1, 0),  // North
-    (0, 1),  // East
-    (-1, 0), // South
-    (0, -1), // West
-];
+use super::backtracking::BacktrackState;
 
 // Precomputed neighbour data structure that works with 2D coordinates
 #[derive(Clone, Debug)]
@@ -27,6 +21,7 @@ pub fn calculate_neighbours(
     is_ignore: &Array2<bool>,
 ) -> Array2<Vec<Neighbour>> {
     let mut neighbors: Array2<Vec<Neighbour>> = Array2::from_elem((height, width), Vec::new());
+    let bounds = (height, width);
 
     for y in 0..height {
         for x in 0..width {
@@ -34,26 +29,16 @@ pub fn calculate_neighbours(
                 continue;
             }
 
-            for (i, dir) in ALL_DIRECTIONS.iter().enumerate() {
-                let (dy, dx) = DIRECTION_DELTAS[i];
-
-                // Safe wrapping addition with bounds check
-                let ny = match y.checked_add_signed(dy) {
-                    Some(val) if val < height => val,
-                    _ => continue,
-                };
-
-                let nx = match x.checked_add_signed(dx) {
-                    Some(val) if val < width => val,
-                    _ => continue,
-                };
-
-                if !is_ignore[(ny, nx)] {
-                    neighbors[(y, x)].push(Neighbour {
-                        pos: (ny, nx),
-                        dir: *dir,
-                        opp_dir: dir.opposite(),
-                    });
+            for dir in ALL_DIRECTIONS.iter() {
+                // Use the direction's apply_to method for safer coordinate calculation
+                if let Some(neighbor_pos) = dir.apply_to((y, x), bounds) {
+                    if !is_ignore[neighbor_pos] {
+                        neighbors[(y, x)].push(Neighbour {
+                            pos: neighbor_pos,
+                            dir: *dir,
+                            opp_dir: dir.opposite(),
+                        });
+                    }
                 }
             }
         }
@@ -72,7 +57,7 @@ pub fn revise(
     dir: Direction,
 ) -> bool {
     let mut modified = false;
-    let dir_index = dir.index::<usize>();
+    let dir_index = dir.index();
 
     // Early exit if domain is already a singleton
     if domain_sizes[xi] <= 1 {
@@ -109,19 +94,21 @@ pub fn revise(
                 modified = true;
             }
         } else {
-            let mut to_remove = Vec::new();
+            // For larger domains, use the bitvector directly
+            // Create a temporary bitvector for efficient operations
+            let mut domain_copy = domains[xi].clone();
 
+            // Efficiently remove values without support by iterating once
             for u in domains[xi].ones() {
                 if !rules.masks()[u][dir_index].contains(v) {
-                    to_remove.push(u);
+                    domain_copy.set(u, false);
                     remove_count += 1;
                 }
             }
 
             if remove_count > 0 {
-                for &u in &to_remove {
-                    domains[xi].remove(u);
-                }
+                // Replace the original domain with our modified copy
+                domains[xi] = domain_copy;
                 domain_sizes[xi] -= remove_count;
                 modified = true;
             }
@@ -131,7 +118,10 @@ pub fn revise(
     }
 
     // Standard case: check each value in xi domain against possible supports in xj
-    let mut to_remove = Vec::new();
+    // Create a temporary bitvector for efficient operations
+    let mut domain_copy = domains[xi].clone();
+    let mut modified_count = 0;
+
     for u in domains[xi].ones() {
         let mask = &rules.masks()[u][dir_index];
         let mut has_support = false;
@@ -145,16 +135,14 @@ pub fn revise(
         }
 
         if !has_support {
-            to_remove.push(u);
+            domain_copy.set(u, false);
+            modified_count += 1;
         }
     }
 
-    if !to_remove.is_empty() {
-        let remove_count = to_remove.len();
-        for &u in &to_remove {
-            domains[xi].remove(u);
-        }
-        domain_sizes[xi] -= remove_count;
+    if modified_count > 0 {
+        domains[xi] = domain_copy;
+        domain_sizes[xi] -= modified_count;
         modified = true;
     }
 
@@ -169,6 +157,7 @@ pub fn propagate_constraints(
     neighbors: &Array2<Vec<Neighbour>>,
     start_cell: (usize, usize),
     max_iterations: usize,
+    mut backtrack_state: Option<&mut BacktrackState>,
 ) -> Result<HashSet<(usize, usize)>> {
     let mut queue = VecDeque::new();
     let mut affected_cells = HashSet::new();
@@ -180,6 +169,15 @@ pub fn propagate_constraints(
 
     let mut iteration_count = 0;
     while let Some((xi, xj, dir)) = queue.pop_front() {
+        // Before modifying a domain, save its state if tracking for backtracking
+        if let Some(state) = &mut backtrack_state {
+            if !state.changed_cells.contains(&xi) {
+                state.changed_cells.insert(xi);
+                state.domain_copies.insert(xi, domains[xi].clone());
+                state.domain_size_copies.insert(xi, domain_sizes[xi]);
+            }
+        }
+
         iteration_count += 1;
         if iteration_count > max_iterations {
             bail!("Too many constraint propagation iterations");

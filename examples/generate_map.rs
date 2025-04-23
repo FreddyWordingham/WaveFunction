@@ -122,6 +122,8 @@ fn main() {
             .expect("Failed to collapse map"),
     };
 
+    println!("{}", map);
+
     let img = map.render(&tileset);
     img.save(&config.output_filepath)
         .expect("Failed to save image");

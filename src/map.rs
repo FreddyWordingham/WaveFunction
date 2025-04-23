@@ -46,7 +46,9 @@ impl Map {
             .collect();
 
         let height = cells.len();
-        let width = if height > 0 { cells[0].len() } else { 0 };
+        assert!(height > 0, "Map must contain at least one row");
+        let width = cells[0].len();
+        assert!(width > 0, "Map must contain at least one column");
         cells.iter().for_each(|row| {
             assert_eq!(row.len(), width, "All rows must have the same length");
         });

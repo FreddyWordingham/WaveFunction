@@ -127,6 +127,7 @@ impl WaveFunction for WaveFunctionFast {
                 &neighbors,
                 best_idx,
                 MAX_ITERATIONS,
+                None, // No backtracking for fast algorithm
             ) {
                 Ok(affected_cells) => {
                     // Update buckets for all affected cells

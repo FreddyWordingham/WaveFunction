@@ -40,16 +40,16 @@ impl Rules {
             ];
             for i in 0..num_tiles {
                 if adjacency_matrix[[j, i, 1]] {
-                    dirs[Direction::North.index::<usize>()].insert(i);
+                    dirs[Direction::North.index()].insert(i);
                 }
                 if adjacency_matrix[[j, i, 0]] {
-                    dirs[Direction::East.index::<usize>()].insert(i);
+                    dirs[Direction::East.index()].insert(i);
                 }
                 if adjacency_matrix[[i, j, 1]] {
-                    dirs[Direction::South.index::<usize>()].insert(i);
+                    dirs[Direction::South.index()].insert(i);
                 }
                 if adjacency_matrix[[i, j, 0]] {
-                    dirs[Direction::West.index::<usize>()].insert(i);
+                    dirs[Direction::West.index()].insert(i);
                 }
             }
             masks.push(dirs);
@@ -78,8 +78,8 @@ impl Rules {
         let mut matrix = Array3::from_elem((num_tiles, num_tiles, 2), false);
         for i in 0..num_tiles {
             for j in 0..num_tiles {
-                matrix[[i, j, 0]] = self.masks[i][Direction::East.index::<usize>()].contains(j);
-                matrix[[i, j, 1]] = self.masks[j][Direction::North.index::<usize>()].contains(i);
+                matrix[[i, j, 0]] = self.masks[i][Direction::East.index()].contains(j);
+                matrix[[i, j, 1]] = self.masks[j][Direction::North.index()].contains(i);
             }
         }
         matrix
