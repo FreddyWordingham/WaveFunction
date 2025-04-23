@@ -1,4 +1,5 @@
 mod backtracking;
+mod common;
 mod fast;
 
 pub use backtracking::WaveFunctionBacktracking;

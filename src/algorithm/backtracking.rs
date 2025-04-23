@@ -2,32 +2,16 @@ use anyhow::{Result, bail};
 use fixedbitset::FixedBitSet;
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::Array2;
-use photo::{ALL_DIRECTIONS, Direction};
 use rand::{distr::weighted::WeightedIndex, prelude::*};
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use super::common::{calculate_neighbors, initial_propagation, propagate_constraints};
 use crate::{Cell, Map, Rules, WaveFunction};
 
 const MAX_ITERATIONS: usize = 1_000_000; // Max iterations for constraint propagation
 const MAX_BACKTRACK_ATTEMPTS: usize = 100; // Max number of backtracking attempts
 const MAX_BACKTRACK_DEPTH: usize = 50; // Max depth for backtracking stack
-
-// Precomputed direction deltas for faster access
-const DIRECTION_DELTAS: [(isize, isize); 4] = [
-    (1, 0),  // North
-    (0, 1),  // East
-    (-1, 0), // South
-    (0, -1), // West
-];
-
-// Precomputed neighbour data structure that works with 2D coordinates
-#[derive(Clone, Debug)]
-struct Neighbour {
-    pos: (usize, usize),
-    dir: Direction,
-    opp_dir: Direction,
-}
 
 // Structure to store state for backtracking
 #[derive(Clone)]
@@ -57,190 +41,25 @@ impl WaveFunction for WaveFunctionBacktracking {
         for y in 0..height {
             for x in 0..width {
                 if !is_ignore[(y, x)] {
-                    let count = domains[(y, x)].count_ones(..);
-                    domain_sizes[(y, x)] = count;
+                    domain_sizes[(y, x)] = domains[(y, x)].count_ones(..);
                 }
             }
         }
 
-        // Precompute neighbors for each cell for faster access
-        let mut neighbors: Array2<Vec<Neighbour>> = Array2::from_elem((height, width), Vec::new());
-        for y in 0..height {
-            for x in 0..width {
-                if is_ignore[(y, x)] {
-                    continue;
-                }
+        // Precompute neighbors using common function
+        let neighbors = calculate_neighbors(height, width, &is_ignore);
 
-                for (i, dir) in ALL_DIRECTIONS.iter().enumerate() {
-                    let (dy, dx) = DIRECTION_DELTAS[i];
-                    let ny = y.wrapping_add(dy as usize);
-                    let nx = x.wrapping_add(dx as usize);
-
-                    if ny < height && nx < width && !is_ignore[(ny, nx)] {
-                        neighbors[(y, x)].push(Neighbour {
-                            pos: (ny, nx),
-                            dir: *dir,
-                            opp_dir: dir.opposite(),
-                        });
-                    }
-                }
-            }
-        }
-
-        // Function to revise constraints
-        fn revise(
-            domains: &mut Array2<FixedBitSet>,
-            domain_sizes: &mut Array2<usize>,
-            rules: &Rules,
-            xi: (usize, usize),
-            xj: (usize, usize),
-            dir: Direction,
-        ) -> bool {
-            let mut modified = false;
-            let dir_index = dir.index::<usize>();
-
-            // Early exit if domain is already a singleton
-            if domain_sizes[xi] <= 1 {
-                return false;
-            }
-
-            // Fast path: if we have only one option in xj, directly filter xi
-            if domain_sizes[xj] == 1 {
-                let v = domains[xj].ones().next().unwrap();
-                let mut to_remove = Vec::new();
-
-                for u in domains[xi].ones() {
-                    if !rules.masks()[u][dir_index].contains(v) {
-                        to_remove.push(u);
-                    }
-                }
-
-                if !to_remove.is_empty() {
-                    let remove_count = to_remove.len();
-                    for &u in &to_remove {
-                        domains[xi].remove(u);
-                    }
-                    domain_sizes[xi] -= remove_count;
-                    modified = true;
-                }
-
-                return modified;
-            }
-
-            // Standard case: check each value in xi domain
-            let mut to_remove = Vec::new();
-            for u in domains[xi].ones() {
-                let mask = &rules.masks()[u][dir_index];
-                let mut has_support = false;
-
-                for v in domains[xj].ones() {
-                    if mask.contains(v) {
-                        has_support = true;
-                        break;
-                    }
-                }
-
-                if !has_support {
-                    to_remove.push(u);
-                }
-            }
-
-            if !to_remove.is_empty() {
-                let remove_count = to_remove.len();
-                for &u in &to_remove {
-                    domains[xi].remove(u);
-                }
-                domain_sizes[xi] -= remove_count;
-                modified = true;
-            }
-
-            modified
-        }
-
-        // Function to propagate constraints
-        fn propagate_constraints(
-            domains: &mut Array2<FixedBitSet>,
-            domain_sizes: &mut Array2<usize>,
-            rules: &Rules,
-            neighbors: &Array2<Vec<Neighbour>>,
-            start_cell: (usize, usize),
-        ) -> Result<HashSet<(usize, usize)>> {
-            let mut queue = VecDeque::new();
-            let mut affected_cells = HashSet::new();
-
-            // Initialize queue with starting cell's neighbors
-            for neighbor in &neighbors[start_cell] {
-                queue.push_back((neighbor.pos, start_cell, neighbor.opp_dir));
-            }
-
-            let mut iteration_count = 0;
-            while let Some((xi, xj, dir)) = queue.pop_front() {
-                iteration_count += 1;
-                if iteration_count > MAX_ITERATIONS {
-                    bail!("Too many constraint propagation iterations");
-                }
-
-                if revise(domains, domain_sizes, rules, xi, xj, dir) {
-                    if domain_sizes[xi] == 0 {
-                        bail!("No valid tiles remain at cell ({}, {})", xi.0, xi.1);
-                    }
-
-                    // Track that this cell was affected
-                    affected_cells.insert(xi);
-
-                    // Add all affected neighbors to queue except xj
-                    for neighbor in &neighbors[xi] {
-                        if neighbor.pos != xj {
-                            queue.push_back((neighbor.pos, xi, neighbor.opp_dir));
-                        }
-                    }
-                }
-            }
-
-            Ok(affected_cells)
-        }
-
-        // Set up initial constraint propagation queue
-        let mut queue = VecDeque::with_capacity(4 * width * height);
-
-        // Initial queue population with all constraints
-        for y in 0..height {
-            for x in 0..width {
-                if is_ignore[(y, x)] {
-                    continue;
-                }
-
-                for neighbor in &neighbors[(y, x)] {
-                    queue.push_back(((y, x), neighbor.pos, neighbor.dir));
-                }
-            }
-        }
-
-        // Initial propagation - full AC-3
-        let mut iteration_count = 0;
-        while let Some((xi, xj, dir)) = queue.pop_front() {
-            iteration_count += 1;
-            if iteration_count > MAX_ITERATIONS {
-                bail!("Too many initial constraint propagation iterations");
-            }
-
-            if revise(&mut domains, &mut domain_sizes, rules, xi, xj, dir) {
-                if domain_sizes[xi] == 0 {
-                    bail!(
-                        "No valid tiles remain at cell ({}, {}) during initial propagation",
-                        xi.0,
-                        xi.1
-                    );
-                }
-
-                // Add all affected neighbors to queue except xj
-                for neighbor in &neighbors[xi] {
-                    if neighbor.pos != xj {
-                        queue.push_back((neighbor.pos, xi, neighbor.opp_dir));
-                    }
-                }
-            }
-        }
+        // Initial propagation - full AC-3 using common function
+        initial_propagation(
+            &mut domains,
+            &mut domain_sizes,
+            rules,
+            height,
+            width,
+            &is_ignore,
+            &neighbors,
+            MAX_ITERATIONS,
+        )?;
 
         // Count cells to collapse for progress bar
         let mut cells_to_collapse = 0;
@@ -339,9 +158,15 @@ impl WaveFunction for WaveFunctionBacktracking {
 
             pb.inc(1);
 
-            // Propagate constraints
-            let propagation_result =
-                propagate_constraints(&mut domains, &mut domain_sizes, rules, &neighbors, best_idx);
+            // Propagate constraints using common function
+            let propagation_result = propagate_constraints(
+                &mut domains,
+                &mut domain_sizes,
+                rules,
+                &neighbors,
+                best_idx,
+                MAX_ITERATIONS,
+            );
 
             match propagation_result {
                 Ok(affected_cells) => {
@@ -359,7 +184,7 @@ impl WaveFunction for WaveFunctionBacktracking {
                     }
                 }
                 Err(_) => {
-                    // Constraint propagation failed
+                    // Constraint propagation failed - backtrack
                     backtrack_count += 1;
                     pb.set_message(backtrack_count.to_string());
 
