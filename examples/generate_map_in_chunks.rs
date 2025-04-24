@@ -1,9 +1,9 @@
 use clap::{Parser, ValueEnum};
 use ndarray::Array2;
 use photo::{Direction, ImageRGBA};
-use rand::rng;
+use rand::{Rng, rng};
 use std::{num::ParseIntError, path::PathBuf, str::FromStr};
-use wave_function::{Map, Tileset, WaveFunctionBacktracking, WaveFunctionFast};
+use wave_function::{Map, Rules, Tileset, WaveFunctionBacktracking, WaveFunctionFast};
 
 /// Only these three algorithms allowed
 #[derive(ValueEnum, Debug, Clone)]
@@ -97,8 +97,8 @@ fn main() {
             config.chunk_size.width, config.chunk_size.height
         );
         println!(
-            "Number of chunks       : {}x{}",
-            config.chunk_size.width, config.chunk_size.height
+            "Number of chunks  : {}x{}",
+            config.num_chunks.width, config.num_chunks.height
         );
         println!("Tile size         : {}", config.tile_size);
         println!("Border size       : {}", config.border_size);
@@ -112,28 +112,91 @@ fn main() {
 
     let mut rng = rng();
 
+    // Initialize array of empty chunks with valid dimensions
     let mut chunks = Array2::from_elem(
-        (config.num_chunks.width, config.num_chunks.height),
+        (config.num_chunks.height, config.num_chunks.width),
         Map::empty((config.chunk_size.width, config.chunk_size.height)),
     );
 
-    chunks[(0, 0)] = match config.algorithm {
-        Algorithm::Fast => Map::empty((config.chunk_size.width, config.chunk_size.height))
-            .collapse::<WaveFunctionFast>(tileset.rules(), &mut rng)
-            .expect("Failed to collapse map"),
-        Algorithm::Backtracking => Map::empty((config.chunk_size.width, config.chunk_size.height))
-            .collapse::<WaveFunctionBacktracking>(tileset.rules(), &mut rng)
-            .expect("Failed to collapse map"),
-    };
-    println!("{}", chunks[(0, 0)]);
+    // Define a function to collapse a chunk based on the selected algorithm
+    fn collapse_map<R: rand::Rng>(
+        map: Map,
+        rules: &Rules,
+        rng: &mut R,
+        algorithm: &Algorithm,
+    ) -> Map {
+        match algorithm {
+            Algorithm::Fast => map
+                .collapse::<WaveFunctionFast>(rules, rng)
+                .expect("Failed to collapse map"),
+            Algorithm::Backtracking => map
+                .collapse::<WaveFunctionBacktracking>(rules, rng)
+                .expect("Failed to collapse map"),
+        }
+    }
 
-    chunks[(1, 0)] = chunks[(0, 0)].bordering_chunk(Direction::East, config.border_size);
-    println!("{}", chunks[(1, 0)]);
+    // Generate chunks in a deterministic order to ensure border consistency
 
-    // let imgs = chunks
-    //     .mapv(|c| c.render(&tileset))
-    //     .map(|img| img.interior(1));
-    // let img = ImageRGBA::from_tiles(&imgs);
-    // img.save(&config.output_filepath)
-    //     .expect("Failed to save image");
+    // First, generate all chunks independently
+    for y in 0..config.num_chunks.height {
+        for x in 0..config.num_chunks.width {
+            let empty_map = Map::empty((config.chunk_size.width, config.chunk_size.height));
+            chunks[(y, x)] = collapse_map(empty_map, tileset.rules(), &mut rng, &config.algorithm);
+
+            if config.verbose {
+                println!("Generated initial chunk at position ({}, {})", x, y);
+            }
+        }
+    }
+
+    // Process borders in a way that avoids borrow checker issues
+    // We'll use a separate loop for each direction
+
+    // Process North-South borders (rows)
+    for y in 1..config.num_chunks.height {
+        for x in 0..config.num_chunks.width {
+            // Create a bordering chunk from the northern neighbor
+            let border = chunks[(y - 1, x)].bordering_chunk(Direction::South, config.border_size);
+
+            // Create a new map with the border constraints
+            let mut new_map = Map::empty((config.chunk_size.width, config.chunk_size.height));
+            new_map.set_shared_border(&border, Direction::North, config.border_size);
+
+            // Collapse the map with these constraints and update the chunk
+            chunks[(y, x)] = collapse_map(new_map, tileset.rules(), &mut rng, &config.algorithm);
+
+            if config.verbose {
+                println!("Processed North-South border at ({}, {})", x, y);
+            }
+        }
+    }
+
+    // Process West-East borders (columns)
+    for x in 1..config.num_chunks.width {
+        for y in 0..config.num_chunks.height {
+            // Create a bordering chunk from the western neighbor
+            let border = chunks[(y, x - 1)].bordering_chunk(Direction::East, config.border_size);
+
+            // Create a new map with the border constraints
+            let mut new_map = Map::empty((config.chunk_size.width, config.chunk_size.height));
+            new_map.set_shared_border(&border, Direction::West, config.border_size);
+
+            // Collapse the map with these constraints and update the chunk
+            chunks[(y, x)] = collapse_map(new_map, tileset.rules(), &mut rng, &config.algorithm);
+
+            if config.verbose {
+                println!("Processed West-East border at ({}, {})", x, y);
+            }
+        }
+    }
+
+    // Render all chunks and merge into one image
+    let imgs = chunks
+        .mapv(|c| c.render(&tileset))
+        .map(|img| img.interior(config.border_size / 2));
+
+    // Create final image from tiles
+    let img = ImageRGBA::from_tiles(&imgs);
+    img.save(&config.output_filepath)
+        .expect("Failed to save image");
 }
